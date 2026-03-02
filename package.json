@@ -1,0 +1,18 @@
+{
+  "name": "iNeedPrayer_Backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "https://github.com/Zain-128/iNeedPrayer_Backend.git",
+  "author": "Zain Raza <100517579+Zain-128@users.noreply.github.com>",
+  "license": "MIT",
+  "module": "ESNext",
+  "type": "module",
+  "scripts": {
+    "start": "node index.ts"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "express": "^5.2.1",
+    "mongoose": "^9.2.3"
+  }
+}
