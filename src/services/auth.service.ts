@@ -35,10 +35,13 @@ export const register = async (input: RegisterInput): Promise<AuthResult> => {
     JWT_SECRET as jwt.Secret,
     { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
   );
-  const userObj = user.toObject();
-  const { password: _, ...userWithoutPassword } = userObj;
   return {
-    user: userWithoutPassword as AuthResult["user"],
+    user: {
+      _id: user._id.toString(),
+      email: user.email,
+      name: user.name,
+      createdAt: user.createdAt,
+    },
     token,
   };
 };
@@ -63,10 +66,13 @@ export const login = async (input: LoginInput): Promise<AuthResult> => {
     JWT_SECRET as jwt.Secret,
     { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
   );
-  const userObj = user.toObject();
-  const { password: _, ...userWithoutPassword } = userObj;
   return {
-    user: userWithoutPassword as AuthResult["user"],
+    user: {
+      _id: user._id.toString(),
+      email: user.email,
+      name: user.name,
+      createdAt: user.createdAt,
+    },
     token,
   };
 };
