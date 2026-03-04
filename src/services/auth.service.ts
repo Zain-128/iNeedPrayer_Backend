@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { User, IUser } from "../models/user.model.js";
+import { User } from "../models/user.model.js";
 import { JWT_SECRET, JWT_EXPIRES_IN } from "../contants.js";
 
 export interface RegisterInput {
@@ -14,7 +14,12 @@ export interface LoginInput {
 }
 
 export interface AuthResult {
-  user: Omit<IUser, "password"> & { _id: string };
+  user: {
+    _id: string;
+    email: string;
+    name: string;
+    createdAt: Date;
+  };
   token: string;
 }
 
