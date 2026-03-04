@@ -8,7 +8,7 @@
   "module": "ESNext",
   "type": "module",
   "scripts": {
-    "start": "tsx index.ts"
+    "start": "tsx server.ts"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
