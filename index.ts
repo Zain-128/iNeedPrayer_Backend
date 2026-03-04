@@ -3,8 +3,9 @@ import express from "express";
 import { dbConnect } from "./src/configs/db.connect.js";
 import { PORT } from "./src/contants.js";
 import authRoutes from "./src/routes/auth.routes.js";
+import app from "./src/app.js";
 
-const app = express();
+
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
