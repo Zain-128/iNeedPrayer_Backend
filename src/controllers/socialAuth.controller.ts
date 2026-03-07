@@ -1,17 +1,19 @@
 import { Request, Response } from "express";
 import * as socialAuthService from "../services/socialAuth.service.js";
 
-export const googleLogin = async (req: Request, res: Response) => {
+export const socialLogin = async (req: Request, res: Response) => {
   try {
-    const { email, name, socialId } = req.body as {
+    const { email, name, socialId, provider } = req.body as {
       email?: string;
       name?: string;
       socialId?: string;
+      provider?: string;
     };
-    const result = await socialAuthService.googleLogin({
+    const result = await socialAuthService.socialLogin({
       email,
       name,
       socialId,
+      provider,
     });
     return res.status(200).json(result);
   } catch (err) {
@@ -19,29 +21,7 @@ export const googleLogin = async (req: Request, res: Response) => {
     const status = e.statusCode ?? 500;
     return res
       .status(status)
-      .json({ message: e.message ?? "Google authentication failed" });
-  }
-};
-
-export const appleLogin = async (req: Request, res: Response) => {
-  try {
-    const { email, name, socialId } = req.body as {
-      email?: string;
-      name?: string;
-      socialId?: string;
-    };
-    const result = await socialAuthService.appleLogin({
-      email,
-      name,
-      socialId,
-    });
-    return res.status(200).json(result);
-  } catch (err) {
-    const e = err as Error & { statusCode?: number };
-    const status = e.statusCode ?? 500;
-    return res
-      .status(status)
-      .json({ message: e.message ?? "Apple authentication failed" });
+      .json({ message: e.message ?? "Social authentication failed" });
   }
 };
 

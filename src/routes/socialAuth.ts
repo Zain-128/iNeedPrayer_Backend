@@ -3,8 +3,7 @@ import * as socialAuthController from "../controllers/socialAuth.controller.js";
 
 const router = Router();
 
-router.post("/google", socialAuthController.googleLogin);
-router.post("/apple", socialAuthController.appleLogin);
+router.post("/social-login", socialAuthController.socialLogin);
 
 export default router;
 

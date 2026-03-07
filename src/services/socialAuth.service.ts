@@ -11,7 +11,7 @@ const signToken = (userId: string) =>
 
 const formatResult = (
   user: any
-): AuthResult & { socialId?: string } => ({
+): AuthResult & { socialId?: string; provider?: string } => ({
   user: {
     _id: user._id.toString(),
     email: user.email,
@@ -19,22 +19,25 @@ const formatResult = (
     createdAt: user.createdAt,
   },
   token: signToken(user._id.toString()),
-  socialId: user.googleId ?? user.appleId,
+  socialId: user.socialId,
+  provider: user.provider,
 });
 
 interface SocialLoginInput {
   email?: string;
   name?: string;
   socialId?: string;
+  provider?: string;
 }
 
-export const googleLogin = async ({
+export const socialLogin = async ({
   email,
   name,
   socialId,
+  provider,
 }: SocialLoginInput): Promise<AuthResult> => {
-  if (!email || !socialId) {
-    const err = new Error("email and socialId are required");
+  if (!email || !socialId || !provider) {
+    const err = new Error("email, socialId and provider are required");
     (err as Error & { statusCode?: number }).statusCode = 400;
     throw err;
   }
@@ -42,7 +45,7 @@ export const googleLogin = async ({
   const normalizedEmail = email.toLowerCase();
 
   let user = await User.findOne({
-    $or: [{ googleId: socialId }, { email: normalizedEmail }],
+    $or: [{ socialId, provider }, { email: normalizedEmail }],
   });
 
   if (!user) {
@@ -50,39 +53,17 @@ export const googleLogin = async ({
       email: normalizedEmail,
       password: crypto.randomUUID(),
       name: name || normalizedEmail.split("@")[0],
-      googleId: socialId,
+      socialId,
+      provider,
     });
+  } else {
+    // optional: attach provider/socialId if missing on existing user
+    if (!user.socialId || !user.provider) {
+      user.socialId = socialId;
+      user.provider = provider;
+      await user.save();
+    }
   }
 
   return formatResult(user);
 };
-
-export const appleLogin = async ({
-  email,
-  name,
-  socialId,
-}: SocialLoginInput): Promise<AuthResult> => {
-  if (!email || !socialId) {
-    const err = new Error("email and socialId are required");
-    (err as Error & { statusCode?: number }).statusCode = 400;
-    throw err;
-  }
-
-  const normalizedEmail = email.toLowerCase();
-
-  let user = await User.findOne({
-    $or: [{ appleId: socialId }, { email: normalizedEmail }],
-  });
-
-  if (!user) {
-    user = await User.create({
-      email: normalizedEmail,
-      password: crypto.randomUUID(),
-      name: name || normalizedEmail.split("@")[0],
-      appleId: socialId,
-    });
-  }
-
-  return formatResult(user);
-};
-
