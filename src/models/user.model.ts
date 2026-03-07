@@ -5,6 +5,8 @@ export interface IUser {
   email: string;
   password: string;
   name: string;
+  googleId?: string;
+  appleId?: string;
   createdAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
 }
@@ -28,6 +30,12 @@ const userSchema = new mongoose.Schema<IUser>(
       type: String,
       required: [true, "Name is required"],
       trim: true,
+    },
+    googleId: {
+      type: String,
+    },
+    appleId: {
+      type: String,
     },
   },
   { timestamps: true }
