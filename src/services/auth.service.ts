@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import { User } from "../models/user.model.js";
-import { JWT_SECRET, JWT_EXPIRES_IN } from "../contants.js";
+import { JWT_SECRET, JWT_EXPIRES_IN, PASSWORD_RESET_CODE } from "../contants.js";
 
 export interface RegisterInput {
   email: string;
@@ -90,4 +90,43 @@ export const getMe = async (userId: string) => {
     throw err;
   }
   return user;
+};
+
+export const forgotPassword = async (
+  _email: string
+): Promise<{ message: string }> => ({
+  message:
+    "If this email is registered, you can reset your password using the reset code.",
+});
+
+export const resetPassword = async (
+  email: string,
+  code: string,
+  newPassword: string
+): Promise<void> => {
+  if (!email || !code || !newPassword) {
+    const err = new Error("Please provide email, code, and password");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (newPassword.length < 6) {
+    const err = new Error("Password must be at least 6 characters");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  const normalizedCode = String(code).trim();
+  const user = await User.findOne({
+    email: email.toLowerCase().trim(),
+  }).select("+password");
+
+  const invalid = new Error("Invalid email or reset code");
+  (invalid as Error & { statusCode?: number }).statusCode = 400;
+
+  if (!user || normalizedCode !== PASSWORD_RESET_CODE) {
+    throw invalid;
+  }
+
+  user.password = newPassword;
+  await user.save();
 };
