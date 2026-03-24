@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import authRoutes from "./routes/auth.routes.js";
+import testRoutes from "./routes/test.routes.js";
 import { dbConnect } from "./configs/db.connect.js";
 
 const app = express();
@@ -21,6 +22,7 @@ app.use(async (_req, _res, next) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/test", testRoutes);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
