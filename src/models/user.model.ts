@@ -5,7 +5,15 @@ export interface IUser {
   email: string;
   password: string;
   name: string;
+  avatar: string;
+  city: string;
+  state: string;
+  country: string;
+  followersCount: number;
+  followingCount: number;
+  postsCount: number;
   createdAt: Date;
+  updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
@@ -29,9 +37,21 @@ const userSchema = new mongoose.Schema<IUser>(
       required: [true, "Name is required"],
       trim: true,
     },
+    avatar: { type: String, default: "" },
+    city: { type: String, default: "" },
+    state: { type: String, default: "" },
+    country: { type: String, default: "" },
+    followersCount: { type: Number, default: 0 },
+    followingCount: { type: Number, default: 0 },
+    postsCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
+
+userSchema.virtual("locationLabel").get(function () {
+  const parts = [this.city, this.state, this.country].filter(Boolean);
+  return parts.length ? parts.join(", ") : "";
+});
 
 userSchema.pre("save", async function () {
   if (!this.isModified("password")) return;
