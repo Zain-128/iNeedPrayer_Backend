@@ -1,6 +1,5 @@
 import type { Server } from "socket.io";
-import jwt from "jsonwebtoken";
-import { JWT_SECRET } from "../contants.js";
+import { verifyAccessToken } from "../utils/jwt.util.js";
 import { Conversation } from "../models/conversation.model.js";
 import { persistInboundChatMessage } from "../services/chat.service.js";
 import { broadcastNewMessage, broadcastChatUpdated } from "./chat.emit.js";
@@ -15,8 +14,8 @@ export function registerChatSocket(io: Server) {
       return next(new Error("auth_required"));
     }
     try {
-      const decoded = jwt.verify(raw, JWT_SECRET) as { userId: string };
-      (socket.data as { userId?: string }).userId = decoded.userId;
+      const { userId } = verifyAccessToken(raw);
+      (socket.data as { userId?: string }).userId = userId;
       next();
     } catch {
       next(new Error("auth_invalid"));

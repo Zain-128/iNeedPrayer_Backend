@@ -1,6 +1,13 @@
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { User } from "../models/user.model.js";
-import { JWT_SECRET, JWT_EXPIRES_IN, PASSWORD_RESET_CODE } from "../contants.js";
+import {
+  JWT_SECRET,
+  JWT_REFRESH_SECRET,
+  JWT_ACCESS_EXPIRES_IN,
+  JWT_REFRESH_EXPIRES_IN,
+  PASSWORD_RESET_CODE,
+} from "../contants.js";
 
 export interface RegisterInput {
   email: string;
@@ -23,6 +30,65 @@ export interface AuthResult {
   token: string;
 }
 
+export type SocialLoginInput = {
+  email: string;
+  socialLoginProvider: string;
+  socialLoginId: string;
+  name: string;
+  profilePicture?: string | null;
+};
+
+export type SocialAuthResult = {
+  user: {
+    _id: string;
+    email: string;
+    name: string;
+    avatar?: string;
+    createdAt: Date;
+  };
+  accessToken: string;
+  refreshToken: string;
+  /** Same as accessToken — for clients expecting `token`. */
+  token: string;
+};
+
+const SOCIAL_PROVIDERS = ["google", "apple", "facebook", "twitter"] as const;
+
+function signAccessToken(userId: string): string {
+  return jwt.sign(
+    { userId, typ: "access" },
+    JWT_SECRET as jwt.Secret,
+    { expiresIn: JWT_ACCESS_EXPIRES_IN } as jwt.SignOptions
+  );
+}
+
+function signRefreshToken(userId: string): string {
+  return jwt.sign(
+    { userId, typ: "refresh" },
+    JWT_REFRESH_SECRET as jwt.Secret,
+    { expiresIn: JWT_REFRESH_EXPIRES_IN } as jwt.SignOptions
+  );
+}
+
+function randomPassword(): string {
+  return crypto.randomBytes(18).toString("base64url").slice(0, 24);
+}
+
+function mapUser(u: {
+  _id: { toString(): string };
+  email: string;
+  name: string;
+  createdAt: Date;
+  avatar?: string;
+}) {
+  return {
+    _id: u._id.toString(),
+    email: u.email,
+    name: u.name,
+    createdAt: u.createdAt,
+  };
+}
+
 export const register = async (input: RegisterInput): Promise<AuthResult> => {
   const existing = await User.findOne({ email: input.email.toLowerCase() });
   if (existing) {
@@ -35,18 +101,9 @@ export const register = async (input: RegisterInput): Promise<AuthResult> => {
     password: input.password,
     name: input.name,
   });
-  const token = jwt.sign(
-    { userId: user._id.toString() },
-    JWT_SECRET as jwt.Secret,
-    { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
-  );
+  const token = signAccessToken(user._id.toString());
   return {
-    user: {
-      _id: user._id.toString(),
-      email: user.email,
-      name: user.name,
-      createdAt: user.createdAt,
-    },
+    user: mapUser(user),
     token,
   };
 };
@@ -66,19 +123,81 @@ export const login = async (input: LoginInput): Promise<AuthResult> => {
     (err as Error & { statusCode?: number }).statusCode = 401;
     throw err;
   }
-  const token = jwt.sign(
-    { userId: user._id.toString() },
-    JWT_SECRET as jwt.Secret,
-    { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
-  );
+  const token = signAccessToken(user._id.toString());
+  return {
+    user: mapUser(user),
+    token,
+  };
+};
+
+export const socialLogin = async (
+  input: SocialLoginInput
+): Promise<SocialAuthResult> => {
+  const email = input.email?.toLowerCase().trim();
+  const name = input.name?.trim();
+  const socialLoginId = String(input.socialLoginId ?? "").trim();
+  const provider = String(input.socialLoginProvider ?? "")
+    .toLowerCase()
+    .trim();
+
+  if (!email || !name || !socialLoginId || !provider) {
+    const err = new Error(
+      "Please provide email, name, socialLoginProvider, and socialLoginId"
+    );
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  if (!SOCIAL_PROVIDERS.includes(provider as (typeof SOCIAL_PROVIDERS)[number])) {
+    const err = new Error(
+      `socialLoginProvider must be one of: ${SOCIAL_PROVIDERS.join(", ")}`
+    );
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  let user = await User.findOne({
+    socialLoginProvider: provider,
+    socialLoginId,
+  });
+
+  if (user && user.email !== email) {
+    const err = new Error("Email does not match this social account");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  if (!user) {
+    const emailTaken = await User.findOne({ email });
+    if (emailTaken) {
+      const err = new Error(
+        "An account with this email already exists. Sign in with password or use the same social provider."
+      );
+      (err as Error & { statusCode?: number }).statusCode = 409;
+      throw err;
+    }
+
+    user = await User.create({
+      email,
+      password: randomPassword(),
+      name,
+      avatar: input.profilePicture?.trim() || "",
+      socialLoginProvider: provider,
+      socialLoginId,
+    });
+  }
+
+  const accessToken = signAccessToken(user._id.toString());
+  const refreshToken = signRefreshToken(user._id.toString());
+
   return {
     user: {
-      _id: user._id.toString(),
-      email: user.email,
-      name: user.name,
-      createdAt: user.createdAt,
+      ...mapUser(user),
+      avatar: user.avatar ?? "",
     },
-    token,
+    accessToken,
+    refreshToken,
+    token: accessToken,
   };
 };
 

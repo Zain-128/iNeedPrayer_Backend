@@ -12,6 +12,8 @@ export interface IUser {
   followersCount: number;
   followingCount: number;
   postsCount: number;
+  socialLoginProvider?: string | null;
+  socialLoginId?: string | null;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -44,8 +46,20 @@ const userSchema = new mongoose.Schema<IUser>(
     followersCount: { type: Number, default: 0 },
     followingCount: { type: Number, default: 0 },
     postsCount: { type: Number, default: 0 },
+    socialLoginProvider: { type: String, default: null },
+    socialLoginId: { type: String, default: null },
   },
   { timestamps: true }
+);
+
+userSchema.index(
+  { socialLoginProvider: 1, socialLoginId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      socialLoginId: { $exists: true, $type: "string", $ne: "" },
+    },
+  }
 );
 
 userSchema.virtual("locationLabel").get(function () {
