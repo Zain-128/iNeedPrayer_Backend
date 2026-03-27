@@ -85,3 +85,22 @@ export const resetPassword = async (req: Request, res: Response) => {
       .json({ message: e.message ?? "Password reset failed" });
   }
 };
+
+export const socialLogin = async (req: Request, res: Response) => {
+  try {
+    const result = await authService.socialLogin(req.body);
+    return res.status(200).json({
+      message: "User login successfully",
+      user: result.user,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      token: result.token,
+    });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    const status = e.statusCode ?? 500;
+    return res
+      .status(status)
+      .json({ message: e.message ?? "Social login failed" });
+  }
+};

@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
-import { JWT_SECRET } from "../contants.js";
 import { User } from "../models/user.model.js";
+import { verifyAccessToken } from "../utils/jwt.util.js";
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -21,12 +20,12 @@ export const protect = async (
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
-    const user = await User.findById(decoded.userId);
+    const { userId } = verifyAccessToken(token);
+    const user = await User.findById(userId);
     if (!user) {
       return res.status(401).json({ message: "User no longer exists" });
     }
-    req.userId = decoded.userId;
+    req.userId = userId;
     req.user = user;
     next();
   } catch {

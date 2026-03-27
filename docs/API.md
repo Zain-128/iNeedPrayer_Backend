@@ -154,6 +154,58 @@ Create a user; returns user (without password) and JWT.
 
 ---
 
+### POST /api/auth/social-login
+
+Links or creates an account using a provider id + email from your mobile SDK (Google / Apple / Facebook / Twitter). The server does **not** verify the OAuth token; the app must obtain `email`, `name`, and stable `socialLoginId` from the provider first, then send them here.
+
+**Body (JSON)**
+
+| Field | Type | Required | Notes |
+|-------|------|----------|--------|
+| `email` | string | Yes | Normalised to lowercase |
+| `name` | string | Yes | Display name |
+| `socialLoginProvider` | string | Yes | One of: `google`, `apple`, `facebook`, `twitter` |
+| `socialLoginId` | string | Yes | Stable id from the provider (subject / user id) |
+| `profilePicture` | string | No | URL string; stored as `avatar` on **new** users only |
+
+**Behaviour**
+
+- **Existing user** (same `socialLoginProvider` + `socialLoginId`): logs in; `email` must match the stored email.
+- **New user**: if `email` is not already registered, creates account with a random internal password and optional `avatar`.
+- **Conflict**: if `email` is already taken by another account type, returns `409` (use password login or the same social provider).
+
+**Success** `200 OK`
+
+```json
+{
+  "message": "User login successfully",
+  "user": {
+    "_id": "...",
+    "email": "user@example.com",
+    "name": "Jane",
+    "avatar": "https://...",
+    "createdAt": "..."
+  },
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+  "token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+`token` is the same value as `accessToken` (for clients that only read `token`). Use `accessToken` in `Authorization: Bearer ...` for protected routes.
+
+**Errors**
+
+| Status | Typical message |
+|--------|-----------------|
+| 400 | Please provide email, name, socialLoginProvider, and socialLoginId |
+| 400 | socialLoginProvider must be one of: google, apple, facebook, twitter |
+| 400 | Email does not match this social account |
+| 409 | An account with this email already exists. Sign in with password or use the same social provider. |
+| 500 | Social login failed |
+
+---
+
 ### POST /api/auth/forgot-password
 
 Placeholder flow (no email). Same response for every request so email existence is not revealed.
@@ -251,16 +303,246 @@ curl -s -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:3004/api/auth
 
 ---
 
+## Posts
+
+Base path: `/api/posts`. Post bodies are JSON (`Content-Type: application/json`).
+
+Unless noted, **protected** routes require:
+
+```http
+Authorization: Bearer <accessToken or token>
+```
+
+**Optional auth** routes accept requests without a token; if a valid `Bearer` token is sent, the response can include viewer-specific fields (for example `isPrayedByMe` / `isPraisedByMe`, and blocked users are filtered when the viewer is known).
+
+### GET /api/posts
+
+List posts (newest first). **Optional auth.**
+
+**Query parameters**
+
+| Param | Type | Default | Notes |
+|-------|------|---------|--------|
+| `page` | number | `1` | Page index (≥ 1) |
+| `limit` | number | `20` | Page size (clamped 1–50) |
+| `q` | string | — | Search text (matches post text or posts by users whose name/email matches) |
+| `groupId` | string | — | MongoDB ObjectId; filter posts in that group |
+| `churchId` | string | — | MongoDB ObjectId; filter posts for that church |
+| `authorId` | string | — | MongoDB ObjectId; only posts by that author (empty if viewer blocked them) |
+
+**Success** `200 OK`
+
+```json
+{
+  "posts": [
+    {
+      "id": "...",
+      "author": {
+        "id": "...",
+        "name": "...",
+        "avatar": "",
+        "location": "City, State, Country"
+      },
+      "time": "2h ago",
+      "text": "...",
+      "image": "https://...",
+      "mode": "prayer",
+      "stats": {
+        "prays": 0,
+        "praises": 0,
+        "comments": 0,
+        "shares": 0
+      },
+      "isPrayedByMe": false,
+      "isPraisedByMe": false
+    }
+  ],
+  "page": 1,
+  "limit": 20,
+  "total": 100
+}
+```
+
+`mode` is `"prayer"` or `"praise"`. `image` is a URL string (often from `POST /api/upload/image` first).
+
+---
+
+### POST /api/posts
+
+Create a post. **Protected.**
+
+**Body**
+
+| Field | Type | Required | Notes |
+|-------|------|----------|--------|
+| `text` | string | No | Body text (stored trimmed; can be empty if `image` is set) |
+| `image` | string | No | Image URL |
+| `mode` | string | No | `"prayer"` (default) or `"praise"` |
+| `groupId` | string | No | If set, user must be a **member** of that group (`403` otherwise) |
+| `churchId` | string | No | Associate post with a church |
+
+**Success** `201 Created` — `{ "post": { ... } }` (same shape as items in `GET /api/posts`).
+
+**Errors**
+
+| Status | Typical message |
+|--------|-----------------|
+| 401 | Unauthorized |
+| 403 | Not a member of this group |
+| 500 | Server error |
+
+---
+
+### GET /api/posts/:id
+
+Single post. **Optional auth** (blocked / reaction flags when logged in).
+
+**Success** `200 OK` — `{ "post": { ... } }`
+
+**Errors:** `400` invalid id · `404` Post not found (includes blocked author case)
+
+---
+
+### PATCH /api/posts/:id
+
+Update own post. **Protected.** Author only.
+
+**Body** (all optional)
+
+| Field | Type | Notes |
+|-------|------|--------|
+| `text` | string | |
+| `image` | string | URL |
+| `mode` | string | `prayer` or `praise` |
+
+**Success** `200 OK` — `{ "post": { ... } }`
+
+**Errors:** `400` invalid id · `403` Not allowed · `404` Post not found
+
+---
+
+### DELETE /api/posts/:id
+
+Delete own post (also removes reactions and comments for that post). **Protected.**
+
+**Success** `200 OK`
+
+```json
+{ "message": "Deleted" }
+```
+
+**Errors:** `400` invalid id · `403` Not allowed · `404` Post not found
+
+---
+
+### POST /api/posts/:id/pray
+
+Toggle “pray” reaction for the current user. **Protected.**
+
+**Success** `200 OK`
+
+```json
+{ "active": true, "praysCount": 5 }
+```
+
+`active` is whether the reaction is now on after the toggle.
+
+---
+
+### POST /api/posts/:id/praise
+
+Toggle “praise” reaction. **Protected.**
+
+**Success** `200 OK`
+
+```json
+{ "active": true, "praisesCount": 3 }
+```
+
+---
+
+### POST /api/posts/:id/share
+
+Increment share count (no body). **Optional auth.**
+
+**Success** `200 OK`
+
+```json
+{ "sharesCount": 12 }
+```
+
+---
+
+### GET /api/posts/:id/pray-praise-users
+
+Users who prayed or praised. **Optional auth.**
+
+**Query**
+
+| Param | Type | Default |
+|-------|------|---------|
+| `type` | `pray` or `praise` | `pray` |
+
+**Success** `200 OK`
+
+```json
+{
+  "users": [
+    { "id": "...", "name": "...", "avatar": "", "type": "pray" }
+  ]
+}
+```
+
+---
+
+### GET /api/posts/:id/comments
+
+List comments (tree) for the post. **Optional auth.**
+
+**Success** `200 OK` — `{ "comments": [ ... ] }` (nested `replies` where applicable)
+
+---
+
+### POST /api/posts/:id/comments
+
+Add a comment. **Protected.**
+
+**Body**
+
+| Field | Type | Required | Notes |
+|-------|------|----------|--------|
+| `text` | string | Yes | Comment body |
+| `parentCommentId` | string | No | For a reply, parent comment id |
+
+**Success** `201 Created` — `{ "comments": [ ... ] }` (full tree for the post)
+
+---
+
+### POST /api/posts/:id/report
+
+Report a post. **Protected.**
+
+**Body**
+
+| Field | Type | Required |
+|-------|------|----------|
+| `reasonKey` | string | Yes |
+| `otherText` | string | No |
+
+**Success** `200 OK` — `{ "message": "Report submitted" }`
+
+---
+
 ## Using the token
 
-1. Call **register** or **login** and read `token` from the JSON body.
+1. Call **register**, **login**, or **social-login** and read `token` (or `accessToken` after social login) from the JSON body.
 2. For protected routes, send:
 
    ```http
    Authorization: Bearer <token>
    ```
 
-3. Expiry follows `JWT_EXPIRES_IN`. After expiry, call **login** again.
+3. Expiry follows `JWT_EXPIRES_IN` / `JWT_ACCESS_EXPIRES_IN`. After expiry, sign in again (a dedicated refresh route may be added later; `refreshToken` is returned for future use).
 
 ---
 
@@ -299,4 +581,18 @@ curl -s -X POST http://localhost:3004/api/auth/forgot-password \
 curl -s -X POST http://localhost:3004/api/auth/reset-password \
   -H "Content-Type: application/json" \
   -d '{"email":"a@b.com","code":"1234","password":"newsecret12"}'
+
+# Social login (replace SUB with provider’s stable user id)
+curl -s -X POST http://localhost:3004/api/auth/social-login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"social@example.com","name":"Social User","socialLoginProvider":"google","socialLoginId":"SUB","profilePicture":"https://example.com/pic.jpg"}'
+
+# List posts (optional: -H "Authorization: Bearer TOKEN")
+curl -s "http://localhost:3004/api/posts?page=1&limit=10"
+
+# Create post (replace TOKEN)
+curl -s -X POST http://localhost:3004/api/posts \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer TOKEN" \
+  -d '{"text":"Prayer request","mode":"prayer","image":""}'
 ```
