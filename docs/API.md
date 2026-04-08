@@ -546,6 +546,10 @@ Report a post. **Protected.**
 
 ---
 
+## Deploy (Vercel)
+
+Serverless Express via `api/index.ts` + `vercel.json`. See **[docs/VERCEL.md](./VERCEL.md)** for Root Directory, env vars, and limits (**Socket.IO is not supported** on Vercel; use REST-only or deploy `server.ts` elsewhere for chat).
+
 ## Deploy (Render)
 
 - **Build command:** `yarn install` (or `npm install`)
