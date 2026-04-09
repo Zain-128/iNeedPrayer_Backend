@@ -1,0 +1,7 @@
+# Render Blueprint — set this repo as the service root, or merge into your monorepo root.
+services:
+  - type: web
+    name: ineedprayer-backend
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
