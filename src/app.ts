@@ -44,12 +44,16 @@ app.use(express.json());
 
 app.use("/uploads", express.static(UPLOAD_ROOT));
 
-// Ensure DB is connected (idempotent; caches on Vercel warm instances)
+// Ensure DB is connected (needed for Vercel serverless; no-op after first connect)
+let dbConnected = false;
 app.use(async (_req, _res, next) => {
-  try {
-    await dbConnect();
-  } catch (err) {
-    console.error("DB connect error:", err);
+  if (!dbConnected) {
+    try {
+      await dbConnect();
+      dbConnected = true;
+    } catch (err) {
+      console.error("DB connect error:", err);
+    }
   }
   next();
 });

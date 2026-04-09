@@ -10,11 +10,7 @@
   "scripts": {
     "start": "tsx server.ts",
     "dev": "tsx watch server.ts",
-    "typecheck": "tsc --noEmit",
-    "vercel-build": "echo 'Vercel bundles api/index.ts'"
-  },
-  "engines": {
-    "node": ">=20"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1019.0",
