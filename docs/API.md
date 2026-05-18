@@ -555,6 +555,22 @@ Report a post. **Protected.**
 
 ---
 
+## Churches
+
+Full church CRUD, follow, discover, verification OTP, and staff members: **[CHURCHES_API.md](./CHURCHES_API.md)**.
+
+Base path: `/api/churches`.
+
+---
+
+## Groups (Community)
+
+Create group, invite members, join/leave, discover, and members: **[GROUPS_API.md](./GROUPS_API.md)**.
+
+Base path: `/api/groups`.
+
+---
+
 ## Quick test (curl)
 
 ```bash

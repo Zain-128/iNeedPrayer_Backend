@@ -1,15 +1,15 @@
 import mongoose from "mongoose";
 
-const groupMemberSchema = new mongoose.Schema(
+const churchMemberSchema = new mongoose.Schema(
   {
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
-    group: {
+    church: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Group",
+      ref: "Church",
       required: true,
     },
     role: {
@@ -21,7 +21,7 @@ const groupMemberSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-groupMemberSchema.index({ user: 1, group: 1 }, { unique: true });
-groupMemberSchema.index({ group: 1 });
+churchMemberSchema.index({ user: 1, church: 1 }, { unique: true });
+churchMemberSchema.index({ church: 1 });
 
-export const GroupMember = mongoose.model("GroupMember", groupMemberSchema);
+export const ChurchMember = mongoose.model("ChurchMember", churchMemberSchema);

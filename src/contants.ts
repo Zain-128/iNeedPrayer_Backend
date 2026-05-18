@@ -19,7 +19,7 @@ export const PASSWORD_RESET_CODE = process.env.PASSWORD_RESET_CODE ?? "1234";
 
 /** Comma-separated origins for CORS; if unset, allows any origin (fine for mobile + Bearer auth). */
 /** Church verification stub (UI flow only until email/OTP is wired). */
-export const CHURCH_VERIFY_CODE = process.env.CHURCH_VERIFY_CODE ?? "0000";
+export const CHURCH_VERIFY_CODE = process.env.CHURCH_VERIFY_CODE ?? "12345";
 
 export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",")
