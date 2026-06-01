@@ -336,8 +336,11 @@ export async function persistInboundChatMessage(
     (err as Error & { statusCode?: number }).statusCode = 400;
     throw err;
   }
-  const allowed = ["text", "image", "video", "audio", "file"];
-  const mt = allowed.includes(messageType) ? messageType : "text";
+  const allowed = ["text", "image", "video", "audio", "file"] as const;
+  type MessageType = (typeof allowed)[number];
+  const mt: MessageType = (allowed as readonly string[]).includes(messageType)
+    ? (messageType as MessageType)
+    : "text";
 
   const msg = await Message.create({
     conversation: conversationId,

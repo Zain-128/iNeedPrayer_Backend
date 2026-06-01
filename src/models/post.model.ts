@@ -11,6 +11,12 @@ const postSchema = new mongoose.Schema(
       index: true,
     },
     text: { type: String, default: "" },
+    sourceLanguage: { type: String, default: "en" },
+    translations: {
+      type: Map,
+      of: String,
+      default: {},
+    },
     image: { type: String, default: "" },
     mode: {
       type: String,
@@ -30,6 +36,7 @@ const postSchema = new mongoose.Schema(
     },
     praysCount: { type: Number, default: 0 },
     praisesCount: { type: Number, default: 0 },
+    likesCount: { type: Number, default: 0 },
     commentsCount: { type: Number, default: 0 },
     sharesCount: { type: Number, default: 0 },
   },

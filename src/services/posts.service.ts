@@ -5,7 +5,9 @@ import { Comment } from "../models/comment.model.js";
 import { User } from "../models/user.model.js";
 import { UserBlock } from "../models/userBlock.model.js";
 import { GroupMember } from "../models/groupMember.model.js";
+import { ChurchMember } from "../models/churchMember.model.js";
 import { mapPost } from "../utils/mappers.js";
+import { buildPostTranslations } from "./translate.service.js";
 
 async function excludedAuthorIds(
   viewerId?: string
@@ -21,25 +23,50 @@ async function excludedAuthorIds(
 
 async function reactionFlags(userId: string | undefined, postIds: string[]) {
   if (!userId || !postIds.length) {
-    return new Map<string, { pray: boolean; praise: boolean }>();
+    return new Map<string, { pray: boolean; praise: boolean; like: boolean }>();
   }
   const uid = new mongoose.Types.ObjectId(userId);
   const rows = await PostReaction.find({
     user: uid,
     post: { $in: postIds.map((id) => new mongoose.Types.ObjectId(id)) },
   }).lean();
-  const m = new Map<string, { pray: boolean; praise: boolean }>();
+  const m = new Map<string, { pray: boolean; praise: boolean; like: boolean }>();
   for (const id of postIds) {
-    m.set(id, { pray: false, praise: false });
+    m.set(id, { pray: false, praise: false, like: false });
   }
   for (const r of rows) {
     const pid = String(r.post);
-    const cur = m.get(pid) ?? { pray: false, praise: false };
+    const cur = m.get(pid) ?? { pray: false, praise: false, like: false };
     if (r.type === "pray") cur.pray = true;
     if (r.type === "praise") cur.praise = true;
+    if (r.type === "like") cur.like = true;
     m.set(pid, cur);
   }
   return m;
+}
+
+function httpError(message: string, statusCode: number) {
+  const err = new Error(message);
+  (err as Error & { statusCode?: number }).statusCode = statusCode;
+  return err;
+}
+
+async function assertPostTarget(
+  authorId: string,
+  groupId?: string,
+  churchId?: string
+) {
+  if (groupId && churchId) {
+    throw httpError("Post cannot belong to both a group and a church", 400);
+  }
+  if (groupId) {
+    const gm = await GroupMember.findOne({ group: groupId, user: authorId });
+    if (!gm) throw httpError("Not a member of this group", 403);
+  }
+  if (churchId) {
+    const cm = await ChurchMember.findOne({ church: churchId, user: authorId });
+    if (!cm) throw httpError("Not a member of this church", 403);
+  }
 }
 
 export async function listPosts(opts: {
@@ -50,6 +77,7 @@ export async function listPosts(opts: {
   groupId?: string;
   authorId?: string;
   churchId?: string;
+  lang?: string;
 }) {
   const page = Math.max(1, opts.page ?? 1);
   const limit = Math.min(50, Math.max(1, opts.limit ?? 20));
@@ -106,17 +134,19 @@ export async function listPosts(opts: {
   const ids = docs.map((d) => d._id.toString());
   const flags = await reactionFlags(opts.viewerId, ids);
   const posts = docs.map((p) => {
-    const f = flags.get(p._id.toString()) ?? { pray: false, praise: false };
+    const f = flags.get(p._id.toString()) ?? { pray: false, praise: false, like: false };
     return mapPost(p as never, {
       prayed: f.pray,
       praised: f.praise,
+      liked: f.like,
+      lang: opts.lang,
     });
   });
 
   return { posts, page, limit, total };
 }
 
-export async function getPost(postId: string, viewerId?: string) {
+export async function getPost(postId: string, viewerId?: string, lang?: string) {
   const exclude = await excludedAuthorIds(viewerId);
   const post = await Post.findById(postId)
     .populate("author", "name avatar city state country")
@@ -134,10 +164,12 @@ export async function getPost(postId: string, viewerId?: string) {
     throw err;
   }
   const flags = await reactionFlags(viewerId, [postId]);
-  const f = flags.get(postId) ?? { pray: false, praise: false };
+  const f = flags.get(postId) ?? { pray: false, praise: false, like: false };
   return mapPost(post as never, {
     prayed: f.pray,
     praised: f.praise,
+    liked: f.like,
+    lang,
   });
 }
 
@@ -149,23 +181,22 @@ export async function createPost(
     mode?: "prayer" | "praise";
     groupId?: string;
     churchId?: string;
+    sourceLanguage?: string;
   }
 ) {
-  if (body.groupId) {
-    const gm = await GroupMember.findOne({
-      group: body.groupId,
-      user: authorId,
-    });
-    if (!gm) {
-      const err = new Error("Not a member of this group");
-      (err as Error & { statusCode?: number }).statusCode = 403;
-      throw err;
-    }
-  }
+  await assertPostTarget(authorId, body.groupId, body.churchId);
+
+  const rawText = body.text?.trim() ?? "";
+  const { sourceLanguage, translations } = await buildPostTranslations(
+    rawText,
+    body.sourceLanguage
+  );
 
   const post = await Post.create({
     author: authorId,
-    text: body.text?.trim() ?? "",
+    text: rawText,
+    sourceLanguage,
+    translations,
     image: body.image?.trim() ?? "",
     mode: body.mode === "praise" ? "praise" : "prayer",
     group: body.groupId || null,
@@ -176,30 +207,38 @@ export async function createPost(
     .populate("author", "name avatar city state country")
     .lean();
   const flags = await reactionFlags(authorId, [String(post._id)]);
-  const f = flags.get(String(post._id)) ?? { pray: false, praise: false };
+  const f = flags.get(String(post._id)) ?? { pray: false, praise: false, like: false };
   return mapPost(populated as never, {
     prayed: f.pray,
     praised: f.praise,
+    liked: f.like,
   });
 }
 
 export async function updatePost(
   postId: string,
   authorId: string,
-  body: { text?: string; image?: string; mode?: "prayer" | "praise" }
+  body: {
+    text?: string;
+    image?: string;
+    mode?: "prayer" | "praise";
+    sourceLanguage?: string;
+  }
 ) {
   const post = await Post.findById(postId);
-  if (!post) {
-    const err = new Error("Post not found");
-    (err as Error & { statusCode?: number }).statusCode = 404;
-    throw err;
+  if (!post) throw httpError("Post not found", 404);
+  if (post.author.toString() !== authorId) throw httpError("Not allowed", 403);
+
+  if (body.text !== undefined) {
+    const rawText = body.text.trim();
+    const { sourceLanguage, translations } = await buildPostTranslations(
+      rawText,
+      body.sourceLanguage ?? post.sourceLanguage
+    );
+    post.text = rawText;
+    post.sourceLanguage = sourceLanguage;
+    post.translations = translations as never;
   }
-  if (post.author.toString() !== authorId) {
-    const err = new Error("Not allowed");
-    (err as Error & { statusCode?: number }).statusCode = 403;
-    throw err;
-  }
-  if (body.text !== undefined) post.text = body.text.trim();
   if (body.image !== undefined) post.image = body.image.trim();
   if (body.mode !== undefined)
     post.mode = body.mode === "praise" ? "praise" : "prayer";
@@ -208,10 +247,11 @@ export async function updatePost(
     .populate("author", "name avatar city state country")
     .lean();
   const flags = await reactionFlags(authorId, [postId]);
-  const f = flags.get(postId) ?? { pray: false, praise: false };
+  const f = flags.get(postId) ?? { pray: false, praise: false, like: false };
   return mapPost(populated as never, {
     prayed: f.pray,
     praised: f.praise,
+    liked: f.like,
   });
 }
 
@@ -281,6 +321,41 @@ export async function togglePraise(postId: string, userId: string) {
   post.praisesCount += 1;
   await post.save();
   return { active: true, praisesCount: post.praisesCount };
+}
+
+export async function toggleLike(postId: string, userId: string) {
+  const post = await Post.findById(postId);
+  if (!post) throw httpError("Post not found", 404);
+  const existing = await PostReaction.findOne({
+    post: postId,
+    user: userId,
+    type: "like",
+  });
+  if (existing) {
+    await existing.deleteOne();
+    post.likesCount = Math.max(0, post.likesCount - 1);
+    await post.save();
+    return { liked: false, likesCount: post.likesCount };
+  }
+  await PostReaction.create({ post: postId, user: userId, type: "like" });
+  post.likesCount += 1;
+  await post.save();
+  return { liked: true, likesCount: post.likesCount };
+}
+
+export async function unlikePost(postId: string, userId: string) {
+  const post = await Post.findById(postId);
+  if (!post) throw httpError("Post not found", 404);
+  const existing = await PostReaction.findOne({
+    post: postId,
+    user: userId,
+    type: "like",
+  });
+  if (!existing) return { liked: false, likesCount: post.likesCount };
+  await existing.deleteOne();
+  post.likesCount = Math.max(0, post.likesCount - 1);
+  await post.save();
+  return { liked: false, likesCount: post.likesCount };
 }
 
 export async function incrementShare(postId: string) {

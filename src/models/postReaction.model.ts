@@ -14,7 +14,7 @@ const postReactionSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["pray", "praise"],
+      enum: ["pray", "praise", "like"],
       required: true,
     },
   },

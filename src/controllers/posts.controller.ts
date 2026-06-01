@@ -14,11 +14,13 @@ export const listPosts = async (req: AuthRequest, res: Response) => {
   try {
     const page = req.query.page ? Number(req.query.page) : undefined;
     const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const lang = typeof req.query.lang === "string" ? req.query.lang : undefined;
     const result = await postsService.listPosts({
       viewerId: req.userId,
       q: typeof req.query.q === "string" ? req.query.q : undefined,
       page,
       limit,
+      lang,
       groupId: typeof req.query.groupId === "string" ? req.query.groupId : undefined,
       authorId: typeof req.query.authorId === "string" ? req.query.authorId : undefined,
       churchId: typeof req.query.churchId === "string" ? req.query.churchId : undefined,
@@ -34,7 +36,8 @@ export const getPost = async (req: AuthRequest, res: Response) => {
   try {
     const id = paramStr(req.params.id);
     if (!mongoose.isValidObjectId(id)) return badId(res);
-    const post = await postsService.getPost(id, req.userId);
+    const lang = typeof req.query.lang === "string" ? req.query.lang : undefined;
+    const post = await postsService.getPost(id, req.userId, lang);
     return res.json({ post });
   } catch (err) {
     const e = err as Error & { statusCode?: number };
@@ -98,6 +101,32 @@ export const praise = async (req: AuthRequest, res: Response) => {
     const id = paramStr(req.params.id);
     if (!mongoose.isValidObjectId(id)) return badId(res);
     const result = await postsService.togglePraise(id, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const like = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) return badId(res);
+    const result = await postsService.toggleLike(id, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const unlike = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) return badId(res);
+    const result = await postsService.unlikePost(id, req.userId);
     return res.json(result);
   } catch (err) {
     const e = err as Error & { statusCode?: number };

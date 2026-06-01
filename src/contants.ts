@@ -71,3 +71,16 @@ export function isB2Configured(): boolean {
     Boolean(B2_PUBLIC_URL_BASE)
   );
 }
+
+/** Google Cloud Translation API key (optional — posts store source text only if unset). */
+export const GOOGLE_TRANSLATE_API_KEY = (
+  process.env.GOOGLE_TRANSLATE_API_KEY ?? ""
+).trim();
+
+/** Languages to auto-translate posts into (excluding detected source). */
+export const TRANSLATION_TARGET_LANGUAGES = (
+  process.env.TRANSLATION_TARGET_LANGUAGES ?? "es,fr,ar,hi,ur,pt"
+)
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);

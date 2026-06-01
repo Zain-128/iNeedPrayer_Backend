@@ -12,6 +12,9 @@ import notificationsRoutes from "./routes/notifications.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
+import friendsRoutes from "./routes/friends.routes.js";
+import socialRoutes from "./routes/social.routes.js";
+import profileRoutes from "./routes/profile.routes.js";
 import { dbConnect } from "./configs/db.connect.js";
 import { ALLOWED_ORIGINS, UPLOAD_ROOT } from "./contants.js";
 
@@ -70,6 +73,9 @@ app.use("/api/notifications", notificationsRoutes);
 app.use("/api/payment-methods", paymentRoutes);
 app.use("/api/subscription", subscriptionRoutes);
 app.use("/api/upload", uploadRoutes);
+app.use("/api/friends", friendsRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api", socialRoutes);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });

@@ -287,6 +287,13 @@ export async function createChurch(
     throw err;
   }
 
+  const existingOwned = await Church.findOne({ createdBy: userId }).select("_id");
+  if (existingOwned) {
+    const err = new Error("You can only create one church");
+    (err as Error & { statusCode?: number }).statusCode = 409;
+    throw err;
+  }
+
   const code =
     opts?.verificationCode?.trim() ||
     (opts?.skipVerification ? null : generateVerificationCode());

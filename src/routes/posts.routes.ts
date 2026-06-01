@@ -13,6 +13,8 @@ router.post("/:id/comments", protect, postsController.addComment);
 router.post("/:id/report", protect, postsController.reportPost);
 router.post("/:id/pray", protect, postsController.pray);
 router.post("/:id/praise", protect, postsController.praise);
+router.post("/:id/like", protect, postsController.like);
+router.post("/:id/unlike", protect, postsController.unlike);
 router.post("/:id/share", optionalAuth, postsController.share);
 router.get("/:id/pray-praise-users", optionalAuth, postsController.prayPraiseUsers);
 

@@ -6,6 +6,9 @@ export interface IUser {
   password: string;
   name: string;
   avatar: string;
+  coverImage: string;
+  bio: string;
+  preferredLanguage: string;
   city: string;
   state: string;
   country: string;
@@ -40,6 +43,9 @@ const userSchema = new mongoose.Schema<IUser>(
       trim: true,
     },
     avatar: { type: String, default: "" },
+    coverImage: { type: String, default: "" },
+    bio: { type: String, default: "", maxlength: 500 },
+    preferredLanguage: { type: String, default: "en" },
     city: { type: String, default: "" },
     state: { type: String, default: "" },
     country: { type: String, default: "" },
