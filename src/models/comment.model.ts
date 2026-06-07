@@ -19,6 +19,8 @@ const commentSchema = new mongoose.Schema(
       ref: "Comment",
       default: null,
     },
+    praysCount: { type: Number, default: 0 },
+    praisesCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

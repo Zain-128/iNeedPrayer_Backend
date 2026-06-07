@@ -83,7 +83,11 @@ export type CommentTreeNode = {
   author: { name: string; avatar: string };
   time: string;
   text: string;
-  replies?: CommentTreeNode[];
+  praysCount: number;
+  praisesCount: number;
+  isPrayedByMe: boolean;
+  isPraisedByMe: boolean;
+  replies: CommentTreeNode[];
 };
 
 export type CommentLean = {
@@ -92,16 +96,20 @@ export type CommentLean = {
   createdAt: Date;
   author: LeanUser;
   parentComment?: unknown;
+  praysCount?: number;
+  praisesCount?: number;
 };
 
 export function mapCommentTree(
   c: CommentLean,
-  replyMap: Map<string, CommentLean[]>
+  replyMap: Map<string, CommentLean[]>,
+  reactionFlags?: Map<string, { pray: boolean; praise: boolean }>
 ): CommentTreeNode {
   const id = c._id.toString();
   const childRows = replyMap.get(id) ?? [];
+  const flags = reactionFlags?.get(id);
   const replies: CommentTreeNode[] = childRows.map((r) =>
-    mapCommentTree(r, replyMap)
+    mapCommentTree(r, replyMap, reactionFlags)
   );
   return {
     id,
@@ -111,7 +119,11 @@ export function mapCommentTree(
     },
     time: timeAgo(c.createdAt),
     text: c.text,
-    ...(replies.length ? { replies } : {}),
+    praysCount: c.praysCount ?? 0,
+    praisesCount: c.praisesCount ?? 0,
+    isPrayedByMe: flags?.pray ?? false,
+    isPraisedByMe: flags?.praise ?? false,
+    replies,
   };
 }
 

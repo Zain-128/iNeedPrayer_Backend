@@ -163,7 +163,7 @@ export const listComments = async (req: AuthRequest, res: Response) => {
   try {
     const id = paramStr(req.params.id);
     if (!mongoose.isValidObjectId(id)) return badId(res);
-    const comments = await commentsService.listCommentsForPost(id);
+    const comments = await commentsService.listCommentsForPost(id, req.userId);
     return res.json({ comments });
   } catch (err) {
     const e = err as Error & { statusCode?: number };

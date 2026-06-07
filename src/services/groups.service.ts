@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { Group } from "../models/group.model.js";
 import { GroupMember } from "../models/groupMember.model.js";
+import { GroupInvite } from "../models/groupInvite.model.js";
 import { Notification } from "../models/notification.model.js";
 import { User } from "../models/user.model.js";
 import { formatCountLabel } from "../utils/mappers.js";
@@ -240,6 +241,7 @@ export async function deleteGroup(groupId: string, userId: string) {
   }
   await Promise.all([
     GroupMember.deleteMany({ group: groupId }),
+    GroupInvite.deleteMany({ group: groupId }),
     group.deleteOne(),
   ]);
   return { ok: true };
@@ -258,6 +260,17 @@ export async function joinGroup(userId: string, groupId: string) {
     (err as Error & { statusCode?: number }).statusCode = 400;
     throw err;
   }
+
+  const pendingInvite = await GroupInvite.findOne({
+    group: groupId,
+    user: userId,
+    status: "pending",
+  });
+  if (pendingInvite) {
+    pendingInvite.status = "accepted";
+    await pendingInvite.save();
+  }
+
   await GroupMember.create({ user: userId, group: groupId, role: "member" });
   g.memberCount += 1;
   await g.save();
@@ -325,8 +338,14 @@ export async function listInviteCandidates(
 ) {
   await assertGroupManager(groupId, actorId);
 
-  const existing = await GroupMember.find({ group: groupId }).select("user").lean();
-  const exclude = new Set(existing.map((m) => m.user.toString()));
+  const [existingMembers, pendingInvites] = await Promise.all([
+    GroupMember.find({ group: groupId }).select("user").lean(),
+    GroupInvite.find({ group: groupId, status: "pending" }).select("user").lean(),
+  ]);
+  const exclude = new Set([
+    ...existingMembers.map((m) => m.user.toString()),
+    ...pendingInvites.map((i) => i.user.toString()),
+  ]);
   exclude.add(actorId);
 
   const search = q?.trim();
@@ -395,27 +414,89 @@ export async function inviteToGroup(
   let invited = 0;
   for (const uid of targetIds) {
     if (uid === inviterId) continue;
-    const exists = await GroupMember.findOne({ user: uid, group: groupId });
-    if (exists) continue;
-    await GroupMember.create({ user: uid, group: groupId, role: "member" });
-    g.memberCount += 1;
+
+    const isMember = await GroupMember.findOne({ user: uid, group: groupId });
+    if (isMember) continue;
+
+    const existingInvite = await GroupInvite.findOne({ user: uid, group: groupId });
+    if (existingInvite?.status === "pending") continue;
+    if (existingInvite?.status === "accepted") continue;
+
+    if (existingInvite) {
+      existingInvite.status = "pending";
+      existingInvite.invitedBy = new mongoose.Types.ObjectId(inviterId);
+      await existingInvite.save();
+    } else {
+      await GroupInvite.create({
+        group: groupId,
+        user: uid,
+        invitedBy: inviterId,
+        status: "pending",
+      });
+    }
+
     invited += 1;
     await Notification.create({
       user: uid,
       title: "Group invite",
-      body: `You were added to ${g.name}`,
+      body: `You were invited to join ${g.name}`,
       kind: "group_invite",
       refType: "group",
       refId: groupId,
     });
   }
 
-  await g.save();
   return {
     invited,
     memberCount: g.memberCount,
     membersLabel: formatCountLabel(g.memberCount, "members"),
   };
+}
+
+export type GroupInviteStatusFilter = "all" | "invited" | "pending" | "accepted";
+
+export async function listGroupInvites(
+  groupId: string,
+  actorId: string,
+  status: GroupInviteStatusFilter = "all"
+) {
+  await assertGroupManager(groupId, actorId);
+
+  type InviteStatus = "pending" | "accepted" | "declined";
+  const filter: {
+    group: string;
+    status?: InviteStatus | { $in: InviteStatus[] };
+  } = { group: groupId };
+
+  if (status === "pending") {
+    filter.status = "pending";
+  } else if (status === "accepted") {
+    filter.status = "accepted";
+  } else if (status === "invited") {
+    filter.status = { $in: ["pending", "accepted"] };
+  }
+
+  const invites = await GroupInvite.find(filter)
+    .populate("user", "name email avatar")
+    .populate("invitedBy", "name avatar")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return invites.map((inv) => ({
+    id: inv._id.toString(),
+    userId: (inv.user as { _id?: mongoose.Types.ObjectId })?._id?.toString() ?? "",
+    name: (inv.user as { name?: string })?.name ?? "",
+    email: (inv.user as { email?: string })?.email ?? "",
+    avatar: (inv.user as { avatar?: string })?.avatar ?? "",
+    status: inv.status,
+    invitedBy: {
+      id:
+        (inv.invitedBy as { _id?: mongoose.Types.ObjectId })?._id?.toString() ?? "",
+      name: (inv.invitedBy as { name?: string })?.name ?? "",
+      avatar: (inv.invitedBy as { avatar?: string })?.avatar ?? "",
+    },
+    invitedAt: inv.createdAt,
+  }));
 }
 
 export async function addGroupMember(

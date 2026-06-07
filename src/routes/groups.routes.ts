@@ -19,6 +19,7 @@ router.post("/:id/leave", protect, groupsController.leaveGroup);
 router.post("/:id/invite", protect, groupsController.inviteGroup);
 
 router.get("/:id/invite-candidates", protect, groupsController.listInviteCandidates);
+router.get("/:id/invites", protect, groupsController.listInvites);
 router.get("/:id/members", protect, groupsController.listMembers);
 router.post("/:id/members", protect, groupsController.addMember);
 router.delete("/:id/members/:userId", protect, groupsController.removeMember);

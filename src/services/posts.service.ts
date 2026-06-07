@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Post } from "../models/post.model.js";
 import { PostReaction } from "../models/postReaction.model.js";
 import { Comment } from "../models/comment.model.js";
+import { CommentReaction } from "../models/commentReaction.model.js";
 import { User } from "../models/user.model.js";
 import { UserBlock } from "../models/userBlock.model.js";
 import { GroupMember } from "../models/groupMember.model.js";
@@ -267,8 +268,10 @@ export async function deletePost(postId: string, authorId: string) {
     (err as Error & { statusCode?: number }).statusCode = 403;
     throw err;
   }
+  const commentIds = await Comment.find({ post: postId }).distinct("_id");
   await Promise.all([
     PostReaction.deleteMany({ post: postId }),
+    CommentReaction.deleteMany({ comment: { $in: commentIds } }),
     Comment.deleteMany({ post: postId }),
     post.deleteOne(),
     User.findByIdAndUpdate(authorId, { $inc: { postsCount: -1 } }),

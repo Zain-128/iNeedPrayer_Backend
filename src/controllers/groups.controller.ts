@@ -175,6 +175,29 @@ export const listMembers = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const listInvites = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) return invalidId(res);
+
+    const raw = typeof req.query.status === "string" ? req.query.status : "all";
+    const status =
+      raw === "invited" ||
+      raw === "pending" ||
+      raw === "accepted" ||
+      raw === "all"
+        ? raw
+        : "all";
+
+    const invites = await groupsService.listGroupInvites(id, req.userId, status);
+    return res.json({ invites });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
 export const listInviteCandidates = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
