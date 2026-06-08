@@ -11,6 +11,7 @@ const groupSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    requiresApproval: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

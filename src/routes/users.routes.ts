@@ -15,6 +15,8 @@ router.delete(
   usersController.unblockUser
 );
 router.get("/search", protect, usersController.searchUsers);
+router.get("/suggestions", protect, usersController.getSuggestions);
+router.get("/:userId/mutual-friends", protect, usersController.getMutualFriends);
 router.get("/:userId", optionalAuth, usersController.getUserProfile);
 router.post("/:userId/follow", protect, usersController.followUser);
 

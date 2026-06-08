@@ -4,8 +4,15 @@ import * as notificationsController from "../controllers/notifications.controlle
 
 const router = Router();
 
-router.get("/", protect, notificationsController.listNotifications);
-router.patch("/:id/read", protect, notificationsController.markRead);
+router.get("/unread-count", protect, notificationsController.getUnreadCount);
+router.get("/settings", protect, notificationsController.getSettings);
+router.patch("/settings", protect, notificationsController.updateSettings);
+router.post("/mute", protect, notificationsController.muteNotifications);
+router.post("/clear-all", protect, notificationsController.clearAllNotifications);
 router.post("/read-all", protect, notificationsController.markAllRead);
+router.get("/", protect, notificationsController.listNotifications);
+router.delete("/:id", protect, notificationsController.deleteNotification);
+router.patch("/:id/read", protect, notificationsController.markRead);
+router.patch("/:id/unread", protect, notificationsController.markUnread);
 
 export default router;

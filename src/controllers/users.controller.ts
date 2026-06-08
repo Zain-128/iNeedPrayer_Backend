@@ -26,6 +26,33 @@ export const patchMe = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getSuggestions = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const users = await usersService.getSuggestedUsers(req.userId, limit);
+    return res.json({ users });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const getMutualFriends = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const userId = paramStr(req.params.userId);
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+    const users = await usersService.getMutualFriends(req.userId, userId);
+    return res.json({ users });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
 export const searchUsers = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });

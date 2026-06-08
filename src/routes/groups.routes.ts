@@ -17,11 +17,35 @@ router.delete("/:id", protect, groupsController.deleteGroup);
 router.post("/:id/join", protect, groupsController.joinGroup);
 router.post("/:id/leave", protect, groupsController.leaveGroup);
 router.post("/:id/invite", protect, groupsController.inviteGroup);
+router.post("/:id/report", protect, groupsController.reportGroup);
+router.post("/:id/mute", protect, groupsController.muteGroup);
+router.post("/:id/unmute", protect, groupsController.unmuteGroup);
+
+router.get("/:id/posts", protect, groupsController.listGroupPosts);
+router.get("/:id/admins", protect, groupsController.listAdmins);
+router.get("/:id/pending-join-requests", protect, groupsController.listPendingJoinRequests);
+router.post(
+  "/:id/join-requests/:userId/approve",
+  protect,
+  groupsController.approveJoinRequest
+);
+router.post(
+  "/:id/join-requests/:userId/reject",
+  protect,
+  groupsController.rejectJoinRequest
+);
 
 router.get("/:id/invite-candidates", protect, groupsController.listInviteCandidates);
 router.get("/:id/invites", protect, groupsController.listInvites);
+router.delete("/:id/invites/:userId", protect, groupsController.cancelInvite);
+router.post("/:id/invites/:userId/resend", protect, groupsController.resendInvite);
+router.post("/:id/invites/:userId/accept", protect, groupsController.acceptInvite);
+router.post("/:id/invites/:userId/reject", protect, groupsController.rejectInvite);
+
 router.get("/:id/members", protect, groupsController.listMembers);
 router.post("/:id/members", protect, groupsController.addMember);
+router.post("/:id/members/:userId/make-admin", protect, groupsController.makeAdmin);
+router.post("/:id/members/:userId/remove-admin", protect, groupsController.removeAdmin);
 router.delete("/:id/members/:userId", protect, groupsController.removeMember);
 router.patch("/:id/members/:userId", protect, groupsController.updateMemberRole);
 

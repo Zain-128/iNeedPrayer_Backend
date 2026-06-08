@@ -1,6 +1,7 @@
 import { Report } from "../models/report.model.js";
 import { Post } from "../models/post.model.js";
 import { Comment } from "../models/comment.model.js";
+import { Group } from "../models/group.model.js";
 
 export async function reportPost(
   reporterId: string,
@@ -40,6 +41,27 @@ export async function reportComment(
     targetType: "comment",
     comment: commentId,
     post: comment.post,
+    reasonKey,
+    otherText: otherText?.trim() ?? "",
+  });
+}
+
+export async function reportGroup(
+  reporterId: string,
+  groupId: string,
+  reasonKey: string,
+  otherText?: string
+) {
+  const group = await Group.findById(groupId);
+  if (!group) {
+    const err = new Error("Group not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  await Report.create({
+    reporter: reporterId,
+    targetType: "group",
+    group: groupId,
     reasonKey,
     otherText: otherText?.trim() ?? "",
   });

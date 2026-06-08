@@ -9,8 +9,13 @@ const reportSchema = new mongoose.Schema(
     },
     targetType: {
       type: String,
-      enum: ["post", "comment"],
+      enum: ["post", "comment", "group"],
       required: true,
+    },
+    group: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Group",
+      default: null,
     },
     post: {
       type: mongoose.Schema.Types.ObjectId,
@@ -30,5 +35,6 @@ const reportSchema = new mongoose.Schema(
 
 reportSchema.index({ reporter: 1, post: 1 });
 reportSchema.index({ reporter: 1, comment: 1 });
+reportSchema.index({ reporter: 1, group: 1 });
 
 export const Report = mongoose.model("Report", reportSchema);

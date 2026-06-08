@@ -13,6 +13,7 @@ import paymentRoutes from "./routes/payment.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 import friendsRoutes from "./routes/friends.routes.js";
+import blockRoutes from "./routes/block.routes.js";
 import socialRoutes from "./routes/social.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
 import { dbConnect } from "./configs/db.connect.js";
@@ -74,6 +75,7 @@ app.use("/api/payment-methods", paymentRoutes);
 app.use("/api/subscription", subscriptionRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/friends", friendsRoutes);
+app.use("/api/block", blockRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api", socialRoutes);
 

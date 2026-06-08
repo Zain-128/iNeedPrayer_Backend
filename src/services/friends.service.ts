@@ -134,6 +134,97 @@ export async function listFriends(userId: string) {
   return friends;
 }
 
+function mapRequestUser(row: {
+  _id: { toString(): string };
+  from: unknown;
+  to: unknown;
+  createdAt: Date;
+}, peerField: "from" | "to") {
+  const peer = row[peerField] as {
+    _id?: mongoose.Types.ObjectId;
+    name?: string;
+    avatar?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+  };
+  return {
+    requestId: row._id.toString(),
+    user: mapAuthor(peer as Parameters<typeof mapAuthor>[0]),
+    requestedAt: row.createdAt,
+  };
+}
+
+export async function listIncomingFriendRequests(userId: string) {
+  const rows = await FriendRequest.find({ to: userId, status: "pending" })
+    .populate("from", "name avatar city state country")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const hide = await UserBlock.find({
+    $or: [{ blocker: userId }, { blocked: userId }],
+  }).lean();
+  const blocked = new Set<string>();
+  for (const b of hide) {
+    if (b.blocker.toString() === userId) blocked.add(b.blocked.toString());
+    else blocked.add(b.blocker.toString());
+  }
+
+  return rows
+    .filter((r) => !blocked.has(r.from._id.toString()))
+    .map((r) => mapRequestUser(r as never, "from"));
+}
+
+export async function listOutgoingFriendRequests(userId: string) {
+  const rows = await FriendRequest.find({ from: userId, status: "pending" })
+    .populate("to", "name avatar city state country")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const hide = await UserBlock.find({
+    $or: [{ blocker: userId }, { blocked: userId }],
+  }).lean();
+  const blocked = new Set<string>();
+  for (const b of hide) {
+    if (b.blocker.toString() === userId) blocked.add(b.blocked.toString());
+    else blocked.add(b.blocker.toString());
+  }
+
+  return rows
+    .filter((r) => !blocked.has(r.to._id.toString()))
+    .map((r) => mapRequestUser(r as never, "to"));
+}
+
+export async function cancelFriendRequest(fromId: string, toId: string) {
+  if (fromId === toId) throw httpError("Invalid request", 400);
+
+  const row = await FriendRequest.findOne({
+    from: fromId,
+    to: toId,
+    status: "pending",
+  });
+  if (!row) throw httpError("Friend request not found", 404);
+
+  await row.deleteOne();
+  return { message: "Friend request cancelled" };
+}
+
+export async function removeFriend(userId: string, friendId: string) {
+  if (userId === friendId) throw httpError("Invalid request", 400);
+
+  const row = await FriendRequest.findOne({
+    status: "accepted",
+    $or: [
+      { from: userId, to: friendId },
+      { from: friendId, to: userId },
+    ],
+  });
+  if (!row) throw httpError("Friend not found", 404);
+
+  await row.deleteOne();
+  return { message: "Friend removed" };
+}
+
 export async function getFriendRequestStatus(
   viewerId: string,
   targetUserId: string

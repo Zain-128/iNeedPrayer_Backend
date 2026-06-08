@@ -363,3 +363,164 @@ export async function blockUser(blockerId: string, blockedId: string) {
 export async function unblockUser(blockerId: string, blockedId: string) {
   await UserBlock.deleteOne({ blocker: blockerId, blocked: blockedId });
 }
+
+export async function getBlockStatus(viewerId: string, targetUserId: string) {
+  if (!mongoose.isValidObjectId(targetUserId)) {
+    const err = new Error("Invalid user id");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (viewerId === targetUserId) {
+    return {
+      blocked: false,
+      blockedByMe: false,
+      blockedByThem: false,
+    };
+  }
+
+  const [blockedByMe, blockedByThem] = await Promise.all([
+    UserBlock.findOne({ blocker: viewerId, blocked: targetUserId }),
+    UserBlock.findOne({ blocker: targetUserId, blocked: viewerId }),
+  ]);
+
+  return {
+    blocked: !!(blockedByMe || blockedByThem),
+    blockedByMe: !!blockedByMe,
+    blockedByThem: !!blockedByThem,
+  };
+}
+
+async function getFriendIds(userId: string): Promise<Set<string>> {
+  const rows = await FriendRequest.find({
+    status: "accepted",
+    $or: [{ from: userId }, { to: userId }],
+  }).lean();
+  const ids = new Set<string>();
+  for (const r of rows) {
+    const peer =
+      r.from.toString() === userId ? r.to.toString() : r.from.toString();
+    ids.add(peer);
+  }
+  return ids;
+}
+
+export async function getMutualFriends(
+  viewerId: string,
+  targetUserId: string
+) {
+  if (viewerId === targetUserId) {
+    const err = new Error("Invalid user id");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  const blocked = await UserBlock.findOne({
+    $or: [
+      { blocker: viewerId, blocked: targetUserId },
+      { blocker: targetUserId, blocked: viewerId },
+    ],
+  });
+  if (blocked) {
+    const err = new Error("User not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+
+  const [myFriends, theirFriends] = await Promise.all([
+    getFriendIds(viewerId),
+    getFriendIds(targetUserId),
+  ]);
+
+  const mutualIds = [...myFriends].filter((id) => theirFriends.has(id));
+  if (!mutualIds.length) return [];
+
+  const users = await User.find({ _id: { $in: mutualIds } })
+    .select("name avatar city state country")
+    .lean();
+
+  return users.map((u) => mapAuthor(u as never));
+}
+
+export async function getSuggestedUsers(viewerId: string, limit = 20) {
+  const hide = await getBlockedUserIds(viewerId);
+  hide.add(viewerId);
+
+  const myFriends = await getFriendIds(viewerId);
+  const exclude = new Set([...hide, ...myFriends]);
+
+  const pending = await FriendRequest.find({
+    status: "pending",
+    $or: [{ from: viewerId }, { to: viewerId }],
+  }).lean();
+  for (const r of pending) {
+    exclude.add(r.from.toString() === viewerId ? r.to.toString() : r.from.toString());
+  }
+
+  let candidateIds: string[] = [];
+  if (myFriends.size) {
+    const friendObjectIds = [...myFriends].map(
+      (id) => new mongoose.Types.ObjectId(id)
+    );
+    const friendsOfFriends = await FriendRequest.find({
+      status: "accepted",
+      $or: [{ from: { $in: friendObjectIds } }, { to: { $in: friendObjectIds } }],
+    }).lean();
+    const counts = new Map<string, number>();
+    for (const r of friendsOfFriends) {
+      for (const id of [r.from.toString(), r.to.toString()]) {
+        if (!myFriends.has(id) && !exclude.has(id)) {
+          counts.set(id, (counts.get(id) ?? 0) + 1);
+        }
+      }
+    }
+    candidateIds = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([id]) => id);
+  }
+
+  const excludeObjectIds = [...exclude]
+    .filter((id) => mongoose.isValidObjectId(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+
+  const users: Array<{
+    _id: mongoose.Types.ObjectId;
+    name: string;
+    avatar?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+  }> = [];
+
+  if (candidateIds.length) {
+    const picked = await User.find({
+      _id: {
+        $in: candidateIds
+          .slice(0, limit)
+          .map((id) => new mongoose.Types.ObjectId(id)),
+      },
+    })
+      .select("name avatar city state country")
+      .lean();
+    const order = new Map(candidateIds.map((id, i) => [id, i]));
+    users.push(
+      ...picked.sort(
+        (a, b) =>
+          (order.get(a._id.toString()) ?? 0) - (order.get(b._id.toString()) ?? 0)
+      )
+    );
+  }
+
+  if (users.length < limit) {
+    const fill = await User.find({ _id: { $nin: excludeObjectIds } })
+      .select("name avatar city state country")
+      .sort({ followersCount: -1 })
+      .limit(limit - users.length)
+      .lean();
+    const seen = new Set(users.map((u) => u._id.toString()));
+    for (const u of fill) {
+      if (!seen.has(u._id.toString())) users.push(u);
+    }
+  }
+
+  return users.slice(0, limit).map((u) => mapAuthor(u as never));
+}

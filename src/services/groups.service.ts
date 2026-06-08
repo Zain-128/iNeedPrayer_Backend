@@ -2,8 +2,11 @@ import mongoose from "mongoose";
 import { Group } from "../models/group.model.js";
 import { GroupMember } from "../models/groupMember.model.js";
 import { GroupInvite } from "../models/groupInvite.model.js";
+import { GroupJoinRequest } from "../models/groupJoinRequest.model.js";
+import { GroupMute } from "../models/groupMute.model.js";
 import { Notification } from "../models/notification.model.js";
 import { User } from "../models/user.model.js";
+import * as postsService from "./posts.service.js";
 import { formatCountLabel } from "../utils/mappers.js";
 import {
   normalizeGroupInput,
@@ -74,6 +77,22 @@ async function loadGroupContext(userId?: string) {
   createdByMeSet = new Set(owned.map((g) => g._id.toString()));
 
   return { memberSet, createdByMeSet };
+}
+
+function httpError(message: string, statusCode: number) {
+  const err = new Error(message);
+  (err as Error & { statusCode?: number }).statusCode = statusCode;
+  return err;
+}
+
+async function assertGroupMember(groupId: string, userId: string) {
+  const group = await Group.findById(groupId);
+  if (!group) throw httpError("Group not found", 404);
+  const membership = await GroupMember.findOne({ user: userId, group: groupId });
+  if (!membership && group.createdBy?.toString() !== userId) {
+    throw httpError("Not a member of this group", 403);
+  }
+  return { group, membership };
 }
 
 async function assertGroupManager(
@@ -242,24 +261,19 @@ export async function deleteGroup(groupId: string, userId: string) {
   await Promise.all([
     GroupMember.deleteMany({ group: groupId }),
     GroupInvite.deleteMany({ group: groupId }),
+    GroupJoinRequest.deleteMany({ group: groupId }),
+    GroupMute.deleteMany({ group: groupId }),
     group.deleteOne(),
   ]);
   return { ok: true };
 }
 
-export async function joinGroup(userId: string, groupId: string) {
+async function addGroupMemberDirect(groupId: string, userId: string) {
   const g = await Group.findById(groupId);
-  if (!g) {
-    const err = new Error("Group not found");
-    (err as Error & { statusCode?: number }).statusCode = 404;
-    throw err;
-  }
+  if (!g) throw httpError("Group not found", 404);
+
   const ex = await GroupMember.findOne({ user: userId, group: groupId });
-  if (ex) {
-    const err = new Error("Already a member");
-    (err as Error & { statusCode?: number }).statusCode = 400;
-    throw err;
-  }
+  if (ex) throw httpError("Already a member", 400);
 
   const pendingInvite = await GroupInvite.findOne({
     group: groupId,
@@ -274,7 +288,144 @@ export async function joinGroup(userId: string, groupId: string) {
   await GroupMember.create({ user: userId, group: groupId, role: "member" });
   g.memberCount += 1;
   await g.save();
-  return getGroup(groupId, userId);
+  return g;
+}
+
+export async function joinGroup(userId: string, groupId: string) {
+  const g = await Group.findById(groupId);
+  if (!g) throw httpError("Group not found", 404);
+
+  const ex = await GroupMember.findOne({ user: userId, group: groupId });
+  if (ex) throw httpError("Already a member", 400);
+
+  if (g.requiresApproval) {
+    const existing = await GroupJoinRequest.findOne({ group: groupId, user: userId });
+    if (existing?.status === "pending") {
+      return { status: "pending" as const, message: "Join request already pending" };
+    }
+    if (existing?.status === "rejected") {
+      existing.status = "pending";
+      await existing.save();
+    } else if (!existing) {
+      await GroupJoinRequest.create({ group: groupId, user: userId, status: "pending" });
+    }
+
+    const admins = await GroupMember.find({
+      group: groupId,
+      role: { $in: ["owner", "admin"] },
+    }).select("user");
+    const ownerId = g.createdBy?.toString();
+    const notifyIds = new Set(admins.map((a) => a.user.toString()));
+    if (ownerId) notifyIds.add(ownerId);
+
+    await Promise.all(
+      [...notifyIds].map((adminId) =>
+        Notification.create({
+          user: adminId,
+          title: "Join request",
+          body: `Someone requested to join ${g.name}`,
+          kind: "group_join_request",
+          refType: "group",
+          refId: groupId,
+        })
+      )
+    );
+
+    return { status: "pending" as const, message: "Join request submitted" };
+  }
+
+  await addGroupMemberDirect(groupId, userId);
+  const group = await getGroup(groupId, userId);
+  return { status: "joined" as const, group };
+}
+
+function mapJoinRequest(row: {
+  _id: { toString(): string };
+  user: unknown;
+  status: string;
+  createdAt: Date;
+}) {
+  return {
+    id: row._id.toString(),
+    userId: (row.user as { _id?: mongoose.Types.ObjectId })?._id?.toString() ?? "",
+    name: (row.user as { name?: string })?.name ?? "",
+    email: (row.user as { email?: string })?.email ?? "",
+    avatar: (row.user as { avatar?: string })?.avatar ?? "",
+    status: row.status,
+    requestedAt: row.createdAt,
+  };
+}
+
+export async function listPendingJoinRequests(groupId: string, actorId: string) {
+  await assertGroupManager(groupId, actorId);
+
+  const rows = await GroupJoinRequest.find({ group: groupId, status: "pending" })
+    .populate("user", "name email avatar")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return rows.map(mapJoinRequest);
+}
+
+export async function approveJoinRequest(
+  groupId: string,
+  actorId: string,
+  targetUserId: string
+) {
+  await assertGroupManager(groupId, actorId);
+
+  const request = await GroupJoinRequest.findOne({
+    group: groupId,
+    user: targetUserId,
+    status: "pending",
+  });
+  if (!request) throw httpError("Join request not found", 404);
+
+  await addGroupMemberDirect(groupId, targetUserId);
+  request.status = "approved";
+  await request.save();
+
+  const g = await Group.findById(groupId);
+  await Notification.create({
+    user: targetUserId,
+    title: "Join request approved",
+    body: `You were approved to join ${g?.name ?? "the group"}`,
+    kind: "group_join_approved",
+    refType: "group",
+    refId: groupId,
+  });
+
+  return { ok: true, userId: targetUserId, status: "approved" };
+}
+
+export async function rejectJoinRequest(
+  groupId: string,
+  actorId: string,
+  targetUserId: string
+) {
+  await assertGroupManager(groupId, actorId);
+
+  const request = await GroupJoinRequest.findOne({
+    group: groupId,
+    user: targetUserId,
+    status: "pending",
+  });
+  if (!request) throw httpError("Join request not found", 404);
+
+  request.status = "rejected";
+  await request.save();
+
+  const g = await Group.findById(groupId);
+  await Notification.create({
+    user: targetUserId,
+    title: "Join request declined",
+    body: `Your request to join ${g?.name ?? "the group"} was declined`,
+    kind: "group_join_rejected",
+    refType: "group",
+    refId: groupId,
+  });
+
+  return { ok: true, userId: targetUserId, status: "rejected" };
 }
 
 export async function leaveGroup(userId: string, groupId: string) {
@@ -453,36 +604,21 @@ export async function inviteToGroup(
   };
 }
 
-export type GroupInviteStatusFilter = "all" | "invited" | "pending" | "accepted";
+export type GroupInviteStatusFilter =
+  | "all"
+  | "invited"
+  | "pending"
+  | "accepted"
+  | "rejected";
 
-export async function listGroupInvites(
-  groupId: string,
-  actorId: string,
-  status: GroupInviteStatusFilter = "all"
-) {
-  await assertGroupManager(groupId, actorId);
-
-  type InviteStatus = "pending" | "accepted" | "declined";
-  const filter: {
-    group: string;
-    status?: InviteStatus | { $in: InviteStatus[] };
-  } = { group: groupId };
-
-  if (status === "pending") {
-    filter.status = "pending";
-  } else if (status === "accepted") {
-    filter.status = "accepted";
-  } else if (status === "invited") {
-    filter.status = { $in: ["pending", "accepted"] };
-  }
-
-  const invites = await GroupInvite.find(filter)
-    .populate("user", "name email avatar")
-    .populate("invitedBy", "name avatar")
-    .sort({ createdAt: -1 })
-    .lean();
-
-  return invites.map((inv) => ({
+function mapGroupInvite(inv: {
+  _id: { toString(): string };
+  user: unknown;
+  invitedBy: unknown;
+  status: string;
+  createdAt: Date;
+}) {
+  return {
     id: inv._id.toString(),
     userId: (inv.user as { _id?: mongoose.Types.ObjectId })?._id?.toString() ?? "",
     name: (inv.user as { name?: string })?.name ?? "",
@@ -496,7 +632,232 @@ export async function listGroupInvites(
       avatar: (inv.invitedBy as { avatar?: string })?.avatar ?? "",
     },
     invitedAt: inv.createdAt,
+  };
+}
+
+export async function listGroupInvites(
+  groupId: string,
+  actorId: string,
+  status: GroupInviteStatusFilter = "all"
+) {
+  await assertGroupManager(groupId, actorId);
+
+  type InviteStatus = "pending" | "accepted" | "rejected";
+  const filter: {
+    group: string;
+    status?: InviteStatus | { $in: InviteStatus[] };
+  } = { group: groupId };
+
+  if (status === "pending") {
+    filter.status = "pending";
+  } else if (status === "accepted") {
+    filter.status = "accepted";
+  } else if (status === "rejected") {
+    filter.status = "rejected";
+  } else if (status === "invited") {
+    filter.status = { $in: ["pending", "accepted"] };
+  }
+
+  const invites = await GroupInvite.find(filter)
+    .populate("user", "name email avatar")
+    .populate("invitedBy", "name avatar")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return invites.map(mapGroupInvite);
+}
+
+async function findGroupInvite(groupId: string, targetUserId: string) {
+  const invite = await GroupInvite.findOne({
+    group: groupId,
+    user: targetUserId,
+  })
+    .populate("user", "name email avatar")
+    .populate("invitedBy", "name avatar");
+  if (!invite) throw httpError("Invite not found", 404);
+  return invite;
+}
+
+async function fulfillGroupInvite(groupId: string, userId: string) {
+  const g = await Group.findById(groupId);
+  if (!g) throw httpError("Group not found", 404);
+
+  const existing = await GroupMember.findOne({ user: userId, group: groupId });
+  if (existing) throw httpError("Already a member", 400);
+
+  await GroupMember.create({ user: userId, group: groupId, role: "member" });
+  g.memberCount += 1;
+  await g.save();
+}
+
+export async function cancelGroupInvite(
+  groupId: string,
+  actorId: string,
+  targetUserId: string
+) {
+  await assertGroupManager(groupId, actorId);
+  const invite = await findGroupInvite(groupId, targetUserId);
+  if (invite.status !== "pending") {
+    throw httpError("Only pending invites can be cancelled", 400);
+  }
+  await invite.deleteOne();
+  return { ok: true };
+}
+
+export async function resendGroupInvite(
+  groupId: string,
+  actorId: string,
+  targetUserId: string
+) {
+  await assertGroupManager(groupId, actorId);
+  const g = await Group.findById(groupId);
+  if (!g) throw httpError("Group not found", 404);
+
+  const invite = await findGroupInvite(groupId, targetUserId);
+
+  const isMember = await GroupMember.findOne({ user: targetUserId, group: groupId });
+  if (isMember) throw httpError("User is already a member", 400);
+  if (invite.status === "pending") {
+    throw httpError("Invite is already pending", 400);
+  }
+  if (invite.status === "accepted") {
+    throw httpError("Invite already accepted", 400);
+  }
+
+  invite.status = "pending";
+  invite.invitedBy = new mongoose.Types.ObjectId(actorId);
+  await invite.save();
+
+  await Notification.create({
+    user: targetUserId,
+    title: "Group invite",
+    body: `You were invited to join ${g.name}`,
+    kind: "group_invite",
+    refType: "group",
+    refId: groupId,
+  });
+
+  return { invite: mapGroupInvite(invite.toObject()) };
+}
+
+export async function acceptGroupInvite(
+  groupId: string,
+  actorId: string,
+  targetUserId: string
+) {
+  if (actorId !== targetUserId) {
+    throw httpError("You can only accept your own invite", 403);
+  }
+
+  const invite = await findGroupInvite(groupId, targetUserId);
+  if (invite.status === "accepted") {
+    throw httpError("Invite already accepted", 400);
+  }
+  if (invite.status === "rejected") {
+    throw httpError("Invite was rejected", 400);
+  }
+
+  await fulfillGroupInvite(groupId, targetUserId);
+  invite.status = "accepted";
+  await invite.save();
+
+  const group = await getGroup(groupId, actorId);
+  return { group, invite: mapGroupInvite(invite.toObject()) };
+}
+
+export async function rejectGroupInvite(
+  groupId: string,
+  actorId: string,
+  targetUserId: string
+) {
+  if (actorId !== targetUserId) {
+    throw httpError("You can only reject your own invite", 403);
+  }
+
+  const invite = await findGroupInvite(groupId, targetUserId);
+  if (invite.status === "accepted") {
+    throw httpError("Invite already accepted", 400);
+  }
+  if (invite.status === "rejected") {
+    throw httpError("Invite already rejected", 400);
+  }
+
+  invite.status = "rejected";
+  await invite.save();
+  return { invite: mapGroupInvite(invite.toObject()) };
+}
+
+export async function listGroupPosts(
+  groupId: string,
+  userId: string,
+  opts: { page?: number; limit?: number; q?: string; lang?: string }
+) {
+  await assertGroupMember(groupId, userId);
+  return postsService.listPosts({
+    viewerId: userId,
+    groupId,
+    page: opts.page,
+    limit: opts.limit,
+    q: opts.q,
+    lang: opts.lang,
+  });
+}
+
+export async function listGroupAdmins(groupId: string, userId: string) {
+  await assertGroupMember(groupId, userId);
+
+  const g = await Group.findById(groupId).lean();
+  if (!g) throw httpError("Group not found", 404);
+
+  const admins = await GroupMember.find({
+    group: groupId,
+    role: { $in: ["owner", "admin"] },
+  })
+    .populate("user", "name email avatar")
+    .sort({ role: 1, createdAt: 1 })
+    .lean();
+
+  return admins.map((m) => ({
+    id: m._id.toString(),
+    userId: (m.user as { _id?: mongoose.Types.ObjectId })?._id?.toString() ?? "",
+    name: (m.user as { name?: string })?.name ?? "",
+    email: (m.user as { email?: string })?.email ?? "",
+    avatar: (m.user as { avatar?: string })?.avatar ?? "",
+    role: m.role as GroupMemberRole,
+    isOwner: g.createdBy?.toString() === (m.user as { _id?: mongoose.Types.ObjectId })?._id?.toString(),
   }));
+}
+
+export async function makeGroupAdmin(
+  groupId: string,
+  actorId: string,
+  targetUserId: string
+) {
+  return updateGroupMemberRole(groupId, actorId, targetUserId, "admin");
+}
+
+export async function removeGroupAdmin(
+  groupId: string,
+  actorId: string,
+  targetUserId: string
+) {
+  return updateGroupMemberRole(groupId, actorId, targetUserId, "member");
+}
+
+export async function muteGroup(groupId: string, userId: string) {
+  await assertGroupMember(groupId, userId);
+  await GroupMute.findOneAndUpdate(
+    { user: userId, group: groupId },
+    {},
+    { upsert: true, new: true }
+  );
+  return { muted: true };
+}
+
+export async function unmuteGroup(groupId: string, userId: string) {
+  await assertGroupMember(groupId, userId);
+  await GroupMute.deleteOne({ user: userId, group: groupId });
+  return { muted: false };
 }
 
 export async function addGroupMember(
