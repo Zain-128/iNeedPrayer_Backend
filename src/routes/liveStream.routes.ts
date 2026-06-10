@@ -29,6 +29,18 @@ router.post(
   liveStreamController.joinLiveStream
 );
 
+router.post(
+  "/:scope/:entityId/refresh-token",
+  protect,
+  liveStreamController.refreshLiveToken
+);
+
+router.post(
+  "/:scope/:entityId/heartbeat",
+  protect,
+  liveStreamController.hostHeartbeat
+);
+
 router.get("/sessions/:sessionId", optionalAuth, liveStreamController.getSession);
 
 export default router;

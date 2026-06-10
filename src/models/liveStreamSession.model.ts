@@ -10,6 +10,7 @@ export interface ILiveStreamSession {
   title: string;
   status: LiveStreamStatus;
   viewerCount: number;
+  lastHeartbeatAt?: Date | null;
   startedAt: Date;
   endedAt?: Date | null;
   endedBy?: mongoose.Types.ObjectId | null;
@@ -45,6 +46,7 @@ const liveStreamSessionSchema = new mongoose.Schema<ILiveStreamSession>(
       index: true,
     },
     viewerCount: { type: Number, default: 0 },
+    lastHeartbeatAt: { type: Date, default: null, index: true },
     startedAt: { type: Date, default: Date.now },
     endedAt: { type: Date, default: null },
     endedBy: {

@@ -94,3 +94,9 @@ export const AGORA_TOKEN_EXPIRY_SECONDS = Math.max(
   300,
   parseInt(process.env.AGORA_TOKEN_EXPIRY_SECONDS ?? "3600", 10) || 3600
 );
+
+/** Host must heartbeat within this window or session auto-ends. */
+export const LIVE_HOST_HEARTBEAT_TIMEOUT_MS = Math.max(
+  30_000,
+  parseInt(process.env.LIVE_HOST_HEARTBEAT_TIMEOUT_MS ?? "90000", 10) || 90_000
+);

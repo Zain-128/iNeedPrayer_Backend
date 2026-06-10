@@ -12,11 +12,37 @@ import {
   buildChannelName,
   buildRtcToken,
   uidFromUserId,
+  type AgoraRole,
 } from "./agora.service.js";
 import { getIo } from "../socket/ioSingleton.js";
 import { notifyLiveSessionEnded } from "../socket/live.socket.js";
 
 export type LiveScope = "church" | "group";
+
+/** In-memory set of active live session ids (avoids DB hit per comment). */
+const activeLiveSessionIds = new Set<string>();
+
+export function isSessionActiveInMemory(sessionId: string) {
+  return activeLiveSessionIds.has(sessionId);
+}
+
+export function markSessionActive(sessionId: string) {
+  activeLiveSessionIds.add(sessionId);
+}
+
+export function markSessionInactive(sessionId: string) {
+  activeLiveSessionIds.delete(sessionId);
+}
+
+/** Restore in-memory active set after server restart. */
+export async function bootstrapActiveLiveSessions() {
+  const live = await LiveStreamSession.find({ status: "live" })
+    .select("_id")
+    .lean();
+  for (const s of live) {
+    activeLiveSessionIds.add(s._id.toString());
+  }
+}
 
 function httpError(message: string, statusCode: number) {
   const err = new Error(message);
@@ -117,6 +143,108 @@ function emitStreamEnded(
   }
 }
 
+async function endSessionRecord(
+  session: mongoose.Document & ILiveStreamSession & { _id: mongoose.Types.ObjectId },
+  opts: { endedBy?: string | null; reason: string }
+) {
+  session.status = "ended";
+  session.endedAt = new Date();
+  session.endedBy = opts.endedBy
+    ? new mongoose.Types.ObjectId(opts.endedBy)
+    : null;
+  await session.save();
+
+  const sessionId = session._id.toString();
+  markSessionInactive(sessionId);
+  emitStreamEnded(sessionId, {
+    reason: opts.reason,
+    churchId: session.churchId?.toString() ?? null,
+    groupId: session.groupId?.toString() ?? null,
+  });
+  notifyLiveSessionEnded(sessionId);
+  return sessionId;
+}
+
+export async function endStaleLiveSessions(maxAgeMs: number): Promise<number> {
+  const cutoff = new Date(Date.now() - maxAgeMs);
+  const stale = await LiveStreamSession.find({
+    status: "live",
+    $or: [
+      { lastHeartbeatAt: { $lt: cutoff } },
+      { lastHeartbeatAt: null, startedAt: { $lt: cutoff } },
+    ],
+  });
+
+  for (const session of stale) {
+    await endSessionRecord(
+      session as mongoose.Document &
+        ILiveStreamSession & { _id: mongoose.Types.ObjectId },
+      { reason: "host_timeout", endedBy: null }
+    );
+  }
+
+  return stale.length;
+}
+
+export async function recordHostHeartbeat(opts: {
+  scope: LiveScope;
+  entityId: string;
+  userId: string;
+}) {
+  const { scope, entityId, userId } = opts;
+
+  if (scope === "church") {
+    await assertChurchManager(entityId, userId);
+  } else {
+    await assertGroupManager(entityId, userId);
+  }
+
+  const session = await findActiveSession(scope, entityId);
+  if (!session) throw httpError("No active live stream", 404);
+  if (session.hostUserId.toString() !== userId) {
+    throw httpError("Only the host can send heartbeat", 403);
+  }
+
+  session.lastHeartbeatAt = new Date();
+  await session.save();
+  markSessionActive(session._id.toString());
+
+  return { ok: true as const, sessionId: session._id.toString() };
+}
+
+export async function refreshLiveToken(opts: {
+  scope: LiveScope;
+  entityId: string;
+  userId: string;
+}) {
+  const { scope, entityId, userId } = opts;
+  const session = await findActiveSession(scope, entityId);
+  if (!session) throw httpError("No active live stream", 404);
+
+  const isHost = session.hostUserId.toString() === userId;
+  let role: AgoraRole = "subscriber";
+
+  if (isHost) {
+    if (scope === "church") {
+      await assertChurchManager(entityId, userId);
+    } else {
+      await assertGroupManager(entityId, userId);
+    }
+    role = "publisher";
+    session.lastHeartbeatAt = new Date();
+    await session.save();
+  }
+
+  const uid = uidFromUserId(userId);
+  const tokenData = buildRtcToken(session.channelName, uid, role);
+
+  return {
+    sessionId: session._id.toString(),
+    ...tokenData,
+    role,
+  };
+}
+
 export async function getLiveStatus(scope: LiveScope, entityId: string) {
   const session = await findActiveSession(scope, entityId);
   if (!session) {
@@ -154,6 +282,9 @@ export async function startLiveStream(opts: {
     }
     const host = await loadHost(userId);
     const uid = uidFromUserId(userId);
+    existing.lastHeartbeatAt = new Date();
+    await existing.save();
+    markSessionActive(existing._id.toString());
     const tokenData = buildRtcToken(existing.channelName, uid, "publisher");
     return {
       ...mapSession(
@@ -175,7 +306,10 @@ export async function startLiveStream(opts: {
     status: "live",
     viewerCount: 0,
     startedAt: new Date(),
+    lastHeartbeatAt: new Date(),
   });
+
+  markSessionActive(session._id.toString());
 
   const host = await loadHost(userId);
   const mapped = mapSession(
@@ -210,21 +344,14 @@ export async function stopLiveStream(opts: {
   const session = await findActiveSession(scope, entityId);
   if (!session) throw httpError("No active live stream", 404);
 
-  session.status = "ended";
-  session.endedAt = new Date();
-  session.endedBy = new mongoose.Types.ObjectId(userId);
-  await session.save();
-
-  const sessionId = session._id.toString();
-  emitStreamEnded(sessionId, {
-    reason: "host_ended",
-    churchId: session.churchId?.toString() ?? null,
-    groupId: session.groupId?.toString() ?? null,
-  });
-  notifyLiveSessionEnded(sessionId);
+  await endSessionRecord(
+    session as mongoose.Document &
+      ILiveStreamSession & { _id: mongoose.Types.ObjectId },
+    { endedBy: userId, reason: "host_ended" }
+  );
 
   return {
-    sessionId,
+    sessionId: session._id.toString(),
     status: "ended" as const,
   };
 }
@@ -258,6 +385,11 @@ export async function getSessionById(sessionId: string) {
   }
   const session = await LiveStreamSession.findById(sessionId);
   if (!session) throw httpError("Session not found", 404);
+  if (session.status === "live") {
+    markSessionActive(sessionId);
+  } else {
+    markSessionInactive(sessionId);
+  }
   const host = await loadHost(session.hostUserId.toString());
   return mapSession(
     session as ILiveStreamSession & { _id: mongoose.Types.ObjectId },

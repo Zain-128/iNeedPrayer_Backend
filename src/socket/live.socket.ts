@@ -11,18 +11,17 @@ import {
 } from "../utils/liveStreamRateLimit.js";
 import {
   getSessionById,
+  isSessionActiveInMemory,
+  recordHostHeartbeat,
   syncViewerCount,
 } from "../services/liveStream.service.js";
+import {
+  getRecentLiveComments,
+  saveLiveComment,
+  type PersistedLiveComment,
+} from "../services/liveStreamComments.service.js";
 
-type LiveComment = {
-  id: string;
-  sessionId: string;
-  userId: string;
-  userName: string;
-  avatar: string;
-  text: string;
-  createdAt: string;
-};
+type LiveComment = PersistedLiveComment;
 
 type SessionRoomState = {
   comments: LiveComment[];
@@ -95,6 +94,17 @@ function cleanupSessionRoom(sessionId: string) {
   sessionRooms.delete(sessionId);
 }
 
+async function loadCommentHistory(sessionId: string): Promise<LiveComment[]> {
+  const cached = getRoomState(sessionId).comments;
+  if (cached.length > 0) {
+    return cached.slice(-40);
+  }
+  const fromDb = await getRecentLiveComments(sessionId, 40);
+  const state = getRoomState(sessionId);
+  state.comments = fromDb.slice(-LIVE_COMMENT_BUFFER_SIZE);
+  return fromDb;
+}
+
 export function registerLiveSocket(io: Server) {
   setInterval(() => pruneCommentRateLimits(), 60_000);
 
@@ -121,6 +131,33 @@ export function registerLiveSocket(io: Server) {
       socket.leave(`live-scope:${scope}:${entityId}`);
     });
 
+    socket.on(
+      "host-heartbeat",
+      async (data: { scope?: string; entityId?: string }) => {
+        const scope = data?.scope;
+        const entityId = data?.entityId;
+        if (
+          (scope !== "church" && scope !== "group") ||
+          !entityId ||
+          !mongoose.isValidObjectId(entityId)
+        ) {
+          return;
+        }
+        try {
+          await recordHostHeartbeat({
+            scope,
+            entityId,
+            userId,
+          });
+          socket.emit("host-heartbeat-ack", { ok: true });
+        } catch (e) {
+          socket.emit("live-error", {
+            message: (e as Error).message ?? "Heartbeat failed",
+          });
+        }
+      }
+    );
+
     socket.on("join-live", async (data: { sessionId?: string }) => {
       const sessionId = data?.sessionId;
       if (!sessionId || !mongoose.isValidObjectId(sessionId)) {
@@ -141,11 +178,8 @@ export function registerLiveSocket(io: Server) {
         socket.join(`live:${sessionId}`);
         (socket.data as { liveSessionId?: string }).liveSessionId = sessionId;
 
-        const state = getRoomState(sessionId);
-        socket.emit("live-history", {
-          sessionId,
-          comments: state.comments.slice(-40),
-        });
+        const history = await loadCommentHistory(sessionId);
+        socket.emit("live-history", { sessionId, comments: history });
 
         emitViewerCount(io, sessionId, true);
       } catch (e) {
@@ -190,23 +224,20 @@ export function registerLiveSocket(io: Server) {
           return;
         }
 
-        try {
-          const session = await getSessionById(sessionId);
-          if (session.status !== "live") {
-            socket.emit("stream-ended", { sessionId, reason: "already_ended" });
-            return;
-          }
+        if (!isSessionActiveInMemory(sessionId)) {
+          socket.emit("stream-ended", { sessionId, reason: "already_ended" });
+          return;
+        }
 
+        try {
           const user = await User.findById(userId).select("name avatar").lean();
-          const comment: LiveComment = {
-            id: new mongoose.Types.ObjectId().toString(),
+          const comment = await saveLiveComment({
             sessionId,
             userId,
             userName: user?.name ?? "User",
             avatar: user?.avatar ?? "",
             text,
-            createdAt: new Date().toISOString(),
-          };
+          });
 
           pushComment(io, sessionId, comment);
         } catch (e) {
@@ -221,10 +252,6 @@ export function registerLiveSocket(io: Server) {
       const sessionId = (socket.data as { liveSessionId?: string }).liveSessionId;
       if (sessionId) emitViewerCount(io, sessionId);
     });
-  });
-
-  io.on("stream-ended-cleanup" as never, (sessionId: string) => {
-    cleanupSessionRoom(sessionId);
   });
 }
 

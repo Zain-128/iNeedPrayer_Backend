@@ -98,3 +98,41 @@ export const getSession = async (req: AuthRequest, res: Response) => {
     return res.status(e.statusCode ?? 500).json({ message: e.message });
   }
 };
+
+export const refreshLiveToken = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const scope = parseScope(req.params.scope);
+    const entityId = paramStr(req.params.entityId);
+    if (!scope || !mongoose.isValidObjectId(entityId)) return invalidId(res);
+
+    const result = await liveStreamService.refreshLiveToken({
+      scope,
+      entityId,
+      userId: req.userId,
+    });
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const hostHeartbeat = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const scope = parseScope(req.params.scope);
+    const entityId = paramStr(req.params.entityId);
+    if (!scope || !mongoose.isValidObjectId(entityId)) return invalidId(res);
+
+    const result = await liveStreamService.recordHostHeartbeat({
+      scope,
+      entityId,
+      userId: req.userId,
+    });
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
