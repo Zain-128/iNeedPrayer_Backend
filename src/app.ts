@@ -16,6 +16,7 @@ import friendsRoutes from "./routes/friends.routes.js";
 import blockRoutes from "./routes/block.routes.js";
 import socialRoutes from "./routes/social.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
+import liveStreamRoutes from "./routes/liveStream.routes.js";
 import { dbConnect } from "./configs/db.connect.js";
 import { ALLOWED_ORIGINS, UPLOAD_ROOT } from "./contants.js";
 
@@ -77,6 +78,7 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/friends", friendsRoutes);
 app.use("/api/block", blockRoutes);
 app.use("/api/profile", profileRoutes);
+app.use("/api/live", liveStreamRoutes);
 app.use("/api", socialRoutes);
 
 app.get("/health", (_req, res) => {

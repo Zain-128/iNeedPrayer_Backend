@@ -84,3 +84,13 @@ export const TRANSLATION_TARGET_LANGUAGES = (
   .split(",")
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
+
+/** Agora RTC — required for live streaming token generation. */
+export const AGORA_APP_ID = (process.env.AGORA_APP_ID ?? "").trim();
+export const AGORA_APP_CERTIFICATE = (
+  process.env.AGORA_APP_CERTIFICATE ?? ""
+).trim();
+export const AGORA_TOKEN_EXPIRY_SECONDS = Math.max(
+  300,
+  parseInt(process.env.AGORA_TOKEN_EXPIRY_SECONDS ?? "3600", 10) || 3600
+);

@@ -4,6 +4,7 @@ import { Server } from "socket.io";
 import { ALLOWED_ORIGINS } from "../contants.js";
 import { setIo } from "./ioSingleton.js";
 import { registerChatSocket } from "./chat.socket.js";
+import { registerLiveSocket } from "./live.socket.js";
 
 export function createHttpServerWithSocket(app: Express) {
   const httpServer = http.createServer(app);
@@ -18,5 +19,6 @@ export function createHttpServerWithSocket(app: Express) {
   });
   setIo(io);
   registerChatSocket(io);
+  registerLiveSocket(io);
   return httpServer;
 }
