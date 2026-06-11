@@ -1,0 +1,17 @@
+import { Router } from "express";
+import { protect } from "../middleware/auth.middleware.js";
+import { optionalAuth } from "../middleware/optionalAuth.middleware.js";
+import { uploadImageFields } from "../middleware/upload.middleware.js";
+import * as profileController from "../controllers/profile.controller.js";
+const router = Router();
+router.get("/me", protect, profileController.getMyProfile);
+router.patch("/me", protect, profileController.updateMyProfile);
+router.post("/me/avatar", protect, uploadImageFields, profileController.uploadAvatar);
+router.post("/me/cover", protect, uploadImageFields, profileController.uploadCover);
+router.post("/change-password", protect, profileController.changePassword);
+router.get("/:userId/posts", optionalAuth, profileController.getUserPosts);
+router.get("/:userId/followers", optionalAuth, profileController.getUserFollowers);
+router.get("/:userId/following", optionalAuth, profileController.getUserFollowing);
+router.get("/:userId/friends", optionalAuth, profileController.getUserFriends);
+router.get("/:userId", optionalAuth, profileController.getUserProfile);
+export default router;

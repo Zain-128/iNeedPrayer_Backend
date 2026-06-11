@@ -6,9 +6,11 @@
     "lib": ["ES2022"],
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true,
+    "noEmit": false,
+    "outDir": "dist",
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["server.ts", "src/**/*.ts"]
+  "include": ["server.ts", "src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

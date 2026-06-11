@@ -1,0 +1,16 @@
+import { verifyAccessToken } from "../utils/jwt.util.js";
+/** Attaches req.userId when a valid Bearer token is present; always calls next(). */
+export const optionalAuth = (req, _res, next) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token)
+        return next();
+    try {
+        const { userId } = verifyAccessToken(token);
+        req.userId = userId;
+    }
+    catch {
+        /* ignore invalid token for optional routes */
+    }
+    next();
+};

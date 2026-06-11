@@ -1,9 +1,23 @@
-import { RtcRole, RtcTokenBuilder } from "agora-access-token";
+import agoraAccessToken from "agora-access-token";
 import {
   AGORA_APP_CERTIFICATE,
   AGORA_APP_ID,
   AGORA_TOKEN_EXPIRY_SECONDS,
 } from "../contants.js";
+
+const { RtcRole, RtcTokenBuilder } = agoraAccessToken as {
+  RtcRole: { PUBLISHER: number; SUBSCRIBER: number };
+  RtcTokenBuilder: {
+    buildTokenWithUid: (
+      appID: string,
+      appCertificate: string,
+      channelName: string,
+      uid: number,
+      role: number,
+      privilegeExpiredTs: number
+    ) => string;
+  };
+};
 
 export type AgoraRole = "publisher" | "subscriber";
 

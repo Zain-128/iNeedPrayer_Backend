@@ -6,18 +6,16 @@ import { createHttpServerWithSocket } from "./src/socket/httpServer.js";
 import { bootstrapActiveLiveSessions } from "./src/services/liveStream.service.js";
 import { startLiveStreamStaleJob } from "./src/jobs/liveStreamStaleJob.js";
 import { dbConnect } from "./src/configs/db.connect.js";
-
 const start = async () => {
-  await dbConnect();
-  await bootstrapActiveLiveSessions();
-  startLiveStreamStaleJob();
-  const httpServer = createHttpServerWithSocket(app);
-  httpServer.listen(Number(PORT), () => {
-    console.log(`HTTP + Socket.IO on port ${PORT}`);
-  });
+    await dbConnect();
+    await bootstrapActiveLiveSessions();
+    startLiveStreamStaleJob();
+    const httpServer = createHttpServerWithSocket(app);
+    httpServer.listen(Number(PORT), () => {
+        console.log(`HTTP + Socket.IO on port ${PORT}`);
+    });
 };
-
 start().catch((err) => {
-  console.error("Failed to start:", err);
-  process.exit(1);
+    console.error("Failed to start:", err);
+    process.exit(1);
 });
