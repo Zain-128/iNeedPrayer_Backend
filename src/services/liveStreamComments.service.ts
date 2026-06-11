@@ -17,17 +17,36 @@ export async function saveLiveComment(input: {
   userName: string;
   avatar: string;
   text: string;
+  commentId?: string;
+  createdAt?: Date;
 }): Promise<PersistedLiveComment> {
+  const createdAt = input.createdAt ?? new Date();
   const doc = await LiveStreamComment.create({
+    _id: input.commentId,
     sessionId: input.sessionId,
     userId: input.userId,
     userName: input.userName,
     avatar: input.avatar,
     text: input.text,
-    createdAt: new Date(),
+    createdAt,
   });
 
   return mapComment(doc);
+}
+
+/** Fire-and-forget persistence — realtime path broadcasts first. */
+export function persistLiveCommentAsync(input: {
+  sessionId: string;
+  userId: string;
+  userName: string;
+  avatar: string;
+  text: string;
+  commentId: string;
+  createdAt: Date;
+}) {
+  saveLiveComment(input).catch((err) => {
+    console.error("[live] comment persist failed:", err);
+  });
 }
 
 export async function getRecentLiveComments(

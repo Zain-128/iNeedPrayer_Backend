@@ -1,6 +1,5 @@
 import type { Server, Socket } from "socket.io";
 import mongoose from "mongoose";
-import { User } from "../models/user.model.js";
 import {
   LIVE_COMMENT_BATCH_MS,
   LIVE_COMMENT_BUFFER_SIZE,
@@ -10,14 +9,15 @@ import {
   pruneCommentRateLimits,
 } from "../utils/liveStreamRateLimit.js";
 import {
-  getSessionById,
+  assertSessionIsLive,
+  flushPendingViewerCount,
   isSessionActiveInMemory,
-  recordHostHeartbeat,
+  touchHostHeartbeat,
   syncViewerCount,
 } from "../services/liveStream.service.js";
 import {
   getRecentLiveComments,
-  saveLiveComment,
+  persistLiveCommentAsync,
   type PersistedLiveComment,
 } from "../services/liveStreamComments.service.js";
 
@@ -84,7 +84,7 @@ function emitViewerCount(io: Server, sessionId: string, force = false) {
 
   const room = io.sockets.adapter.rooms.get(`live:${sessionId}`);
   const count = room ? room.size : 0;
-  syncViewerCount(sessionId, count).catch(() => {});
+  syncViewerCount(sessionId, count);
   io.to(`live:${sessionId}`).emit("viewer-count", { sessionId, count });
 }
 
@@ -95,13 +95,13 @@ function cleanupSessionRoom(sessionId: string) {
 }
 
 async function loadCommentHistory(sessionId: string): Promise<LiveComment[]> {
-  const cached = getRoomState(sessionId).comments;
-  if (cached.length > 0) {
-    return cached.slice(-40);
+  const state = sessionRooms.get(sessionId);
+  if (state && state.comments.length > 0) {
+    return state.comments.slice(-40);
   }
   const fromDb = await getRecentLiveComments(sessionId, 40);
-  const state = getRoomState(sessionId);
-  state.comments = fromDb.slice(-LIVE_COMMENT_BUFFER_SIZE);
+  const roomState = getRoomState(sessionId);
+  roomState.comments = fromDb.slice(-LIVE_COMMENT_BUFFER_SIZE);
   return fromDb;
 }
 
@@ -109,7 +109,12 @@ export function registerLiveSocket(io: Server) {
   setInterval(() => pruneCommentRateLimits(), 60_000);
 
   io.on("connection", (socket: Socket) => {
-    const userId = (socket.data as { userId: string }).userId;
+    const socketData = socket.data as {
+      userId: string;
+      userName?: string;
+      userAvatar?: string;
+    };
+    const userId = socketData.userId;
 
     socket.on("subscribe-live-scope", (data: { scope?: string; entityId?: string }) => {
       const scope = data?.scope;
@@ -144,7 +149,7 @@ export function registerLiveSocket(io: Server) {
           return;
         }
         try {
-          await recordHostHeartbeat({
+          await touchHostHeartbeat({
             scope,
             entityId,
             userId,
@@ -166,8 +171,8 @@ export function registerLiveSocket(io: Server) {
       }
 
       try {
-        const session = await getSessionById(sessionId);
-        if (session.status !== "live") {
+        const isLive = await assertSessionIsLive(sessionId);
+        if (!isLive) {
           socket.emit("stream-ended", {
             sessionId,
             reason: "already_ended",
@@ -230,16 +235,32 @@ export function registerLiveSocket(io: Server) {
         }
 
         try {
-          const user = await User.findById(userId).select("name avatar").lean();
-          const comment = await saveLiveComment({
+          const commentId = new mongoose.Types.ObjectId();
+          const createdAt = new Date();
+          const userName = socketData.userName ?? "User";
+          const avatar = socketData.userAvatar ?? "";
+
+          const comment: LiveComment = {
+            id: commentId.toString(),
             sessionId,
             userId,
-            userName: user?.name ?? "User",
-            avatar: user?.avatar ?? "",
+            userName,
+            avatar,
             text,
-          });
+            createdAt: createdAt.toISOString(),
+          };
 
           pushComment(io, sessionId, comment);
+
+          persistLiveCommentAsync({
+            sessionId,
+            userId,
+            userName,
+            avatar,
+            text,
+            commentId: commentId.toString(),
+            createdAt,
+          });
         } catch (e) {
           socket.emit("live-error", {
             message: (e as Error).message ?? "Failed to send comment",
@@ -256,5 +277,6 @@ export function registerLiveSocket(io: Server) {
 }
 
 export function notifyLiveSessionEnded(sessionId: string) {
+  void flushPendingViewerCount(sessionId);
   cleanupSessionRoom(sessionId);
 }

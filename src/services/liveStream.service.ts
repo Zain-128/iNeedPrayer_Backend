@@ -212,6 +212,49 @@ export async function recordHostHeartbeat(opts: {
   return { ok: true as const, sessionId: session._id.toString() };
 }
 
+/** Single DB round-trip for socket heartbeats (host already verified at stream start). */
+export async function touchHostHeartbeat(opts: {
+  scope: LiveScope;
+  entityId: string;
+  userId: string;
+}) {
+  const { scope, entityId, userId } = opts;
+  const filter =
+    scope === "church"
+      ? { churchId: entityId, status: "live" as const, hostUserId: userId }
+      : { groupId: entityId, status: "live" as const, hostUserId: userId };
+
+  const session = await LiveStreamSession.findOneAndUpdate(
+    filter,
+    { lastHeartbeatAt: new Date() },
+    { new: true }
+  ).select("_id");
+
+  if (!session) throw httpError("No active live stream", 404);
+
+  const sessionId = session._id.toString();
+  markSessionActive(sessionId);
+  return { ok: true as const, sessionId };
+}
+
+/** Lightweight live check for socket join (avoids loading host profile). */
+export async function assertSessionIsLive(sessionId: string): Promise<boolean> {
+  if (!mongoose.isValidObjectId(sessionId)) return false;
+
+  if (isSessionActiveInMemory(sessionId)) return true;
+
+  const session = await LiveStreamSession.findById(sessionId)
+    .select("status")
+    .lean();
+  if (!session || session.status !== "live") {
+    markSessionInactive(sessionId);
+    return false;
+  }
+
+  markSessionActive(sessionId);
+  return true;
+}
+
 export async function refreshLiveToken(opts: {
   scope: LiveScope;
   entityId: string;
@@ -404,9 +447,45 @@ export async function incrementViewerCount(sessionId: string, delta: number) {
   });
 }
 
-export async function syncViewerCount(sessionId: string, count: number) {
+const pendingViewerCounts = new Map<string, number>();
+let viewerCountFlushTimer: ReturnType<typeof setTimeout> | null = null;
+const VIEWER_COUNT_DB_FLUSH_MS = 10_000;
+
+function scheduleViewerCountFlush() {
+  if (viewerCountFlushTimer) return;
+  viewerCountFlushTimer = setTimeout(() => {
+    viewerCountFlushTimer = null;
+    flushViewerCountsToDb().catch((err) => {
+      console.error("[live] viewer count flush failed:", err);
+    });
+  }, VIEWER_COUNT_DB_FLUSH_MS);
+}
+
+async function flushViewerCountsToDb() {
+  if (pendingViewerCounts.size === 0) return;
+  const batch = new Map(pendingViewerCounts);
+  pendingViewerCounts.clear();
+
+  await Promise.all(
+    Array.from(batch.entries()).map(([sessionId, count]) =>
+      LiveStreamSession.findByIdAndUpdate(sessionId, {
+        viewerCount: Math.max(0, count),
+      })
+    )
+  );
+}
+
+export function syncViewerCount(sessionId: string, count: number) {
   if (!mongoose.isValidObjectId(sessionId)) return;
-  await LiveStreamSession.findByIdAndUpdate(sessionId, {
+  pendingViewerCounts.set(sessionId, Math.max(0, count));
+  scheduleViewerCountFlush();
+}
+
+export function flushPendingViewerCount(sessionId: string) {
+  const count = pendingViewerCounts.get(sessionId);
+  if (count === undefined) return;
+  pendingViewerCounts.delete(sessionId);
+  return LiveStreamSession.findByIdAndUpdate(sessionId, {
     viewerCount: Math.max(0, count),
   });
 }

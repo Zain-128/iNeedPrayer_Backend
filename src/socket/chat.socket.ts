@@ -1,11 +1,31 @@
 import type { Server } from "socket.io";
 import { verifyAccessToken } from "../utils/jwt.util.js";
 import { Conversation } from "../models/conversation.model.js";
+import { User } from "../models/user.model.js";
 import { persistInboundChatMessage } from "../services/chat.service.js";
 import { broadcastNewMessage, broadcastChatUpdated } from "./chat.emit.js";
 
+type CachedProfile = { name: string; avatar: string; at: number };
+const userProfileCache = new Map<string, CachedProfile>();
+const USER_PROFILE_CACHE_MS = 5 * 60_000;
+
+async function loadUserProfile(userId: string): Promise<CachedProfile> {
+  const cached = userProfileCache.get(userId);
+  if (cached && Date.now() - cached.at < USER_PROFILE_CACHE_MS) {
+    return cached;
+  }
+  const user = await User.findById(userId).select("name avatar").lean();
+  const profile: CachedProfile = {
+    name: user?.name ?? "User",
+    avatar: user?.avatar ?? "",
+    at: Date.now(),
+  };
+  userProfileCache.set(userId, profile);
+  return profile;
+}
+
 export function registerChatSocket(io: Server) {
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const t =
       (socket.handshake.auth as { token?: string } | undefined)?.token ??
       socket.handshake.query?.token;
@@ -15,7 +35,15 @@ export function registerChatSocket(io: Server) {
     }
     try {
       const { userId } = verifyAccessToken(raw);
-      (socket.data as { userId?: string }).userId = userId;
+      const profile = await loadUserProfile(userId);
+      const data = socket.data as {
+        userId?: string;
+        userName?: string;
+        userAvatar?: string;
+      };
+      data.userId = userId;
+      data.userName = profile.name;
+      data.userAvatar = profile.avatar;
       next();
     } catch {
       next(new Error("auth_invalid"));
