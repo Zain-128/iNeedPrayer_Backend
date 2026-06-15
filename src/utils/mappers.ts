@@ -80,7 +80,7 @@ export function mapPost(
 
 export type CommentTreeNode = {
   id: string;
-  author: { name: string; avatar: string };
+  author: ReturnType<typeof mapAuthor>;
   time: string;
   text: string;
   praysCount: number;
@@ -113,10 +113,7 @@ export function mapCommentTree(
   );
   return {
     id,
-    author: {
-      name: c.author.name,
-      avatar: c.author.avatar ?? "",
-    },
+    author: mapAuthor(c.author),
     time: timeAgo(c.createdAt),
     text: c.text,
     praysCount: c.praysCount ?? 0,

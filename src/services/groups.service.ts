@@ -611,6 +611,24 @@ export type GroupInviteStatusFilter =
   | "accepted"
   | "rejected";
 
+function mapPopulatedInviteUser(u: unknown) {
+  if (!u || typeof u !== "object") return null;
+  const doc = u as {
+    _id?: mongoose.Types.ObjectId;
+    name?: string;
+    email?: string;
+    avatar?: string;
+  };
+  const id = doc._id?.toString() ?? "";
+  if (!id) return null;
+  return {
+    id,
+    name: doc.name ?? "",
+    email: doc.email ?? "",
+    avatar: doc.avatar ?? "",
+  };
+}
+
 function mapGroupInvite(inv: {
   _id: { toString(): string };
   user: unknown;
@@ -618,12 +636,14 @@ function mapGroupInvite(inv: {
   status: string;
   createdAt: Date;
 }) {
+  const user = mapPopulatedInviteUser(inv.user);
   return {
     id: inv._id.toString(),
-    userId: (inv.user as { _id?: mongoose.Types.ObjectId })?._id?.toString() ?? "",
-    name: (inv.user as { name?: string })?.name ?? "",
-    email: (inv.user as { email?: string })?.email ?? "",
-    avatar: (inv.user as { avatar?: string })?.avatar ?? "",
+    user,
+    userId: user?.id ?? "",
+    name: user?.name ?? "",
+    email: user?.email ?? "",
+    avatar: user?.avatar ?? "",
     status: inv.status,
     invitedBy: {
       id:
@@ -664,7 +684,10 @@ export async function listGroupInvites(
     .sort({ createdAt: -1 })
     .lean();
 
-  return invites.map(mapGroupInvite);
+  return invites
+    .filter((inv) => inv.user != null)
+    .map(mapGroupInvite)
+    .filter((inv) => inv.user != null);
 }
 
 async function findGroupInvite(groupId: string, targetUserId: string) {
