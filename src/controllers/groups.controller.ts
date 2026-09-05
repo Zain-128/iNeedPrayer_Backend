@@ -425,10 +425,7 @@ export const reportGroup = async (req: AuthRequest, res: Response) => {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
     const id = paramStr(req.params.id);
     if (!mongoose.isValidObjectId(id)) return invalidId(res);
-    const { reasonKey, otherText } = req.body ?? {};
-    if (!reasonKey || typeof reasonKey !== "string") {
-      return res.status(400).json({ message: "reasonKey is required" });
-    }
+    const { reasonKey, otherText } = reportsService.parseReportBody(req.body);
     await reportsService.reportGroup(req.userId, id, reasonKey, otherText);
     return res.json({ message: "Report submitted" });
   } catch (err) {

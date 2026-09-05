@@ -46,10 +46,7 @@ export const reportComment = async (req: AuthRequest, res: Response) => {
     if (!mongoose.isValidObjectId(id)) {
       return res.status(400).json({ message: "Invalid id" });
     }
-    const { reasonKey, otherText } = req.body ?? {};
-    if (!reasonKey || typeof reasonKey !== "string") {
-      return res.status(400).json({ message: "reasonKey is required" });
-    }
+    const { reasonKey, otherText } = reportsService.parseReportBody(req.body);
     await reportsService.reportComment(req.userId, id, reasonKey, otherText);
     return res.json({ message: "Report submitted" });
   } catch (err) {

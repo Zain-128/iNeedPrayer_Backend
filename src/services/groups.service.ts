@@ -4,9 +4,9 @@ import { GroupMember } from "../models/groupMember.model.js";
 import { GroupInvite } from "../models/groupInvite.model.js";
 import { GroupJoinRequest } from "../models/groupJoinRequest.model.js";
 import { GroupMute } from "../models/groupMute.model.js";
-import { Notification } from "../models/notification.model.js";
 import { User } from "../models/user.model.js";
 import * as postsService from "./posts.service.js";
+import { createNotification, notifyMany } from "./notifications.service.js";
 import { formatCountLabel } from "../utils/mappers.js";
 import {
   normalizeGroupInput,
@@ -140,12 +140,18 @@ export async function listGroups(opts: {
   const rx = q
     ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
     : null;
-  const filter = rx ? { $or: [{ name: rx }, { description: rx }] } : {};
+  const filter: Record<string, unknown> = rx
+    ? { $or: [{ name: rx }, { description: rx }] }
+    : {};
+
+  // Public lists hide suspended groups; "my" / "joined" still include them for owners/members
+  const tab = opts.tab ?? (opts.mine ? "my" : undefined);
+  if (tab !== "my" && tab !== "joined") {
+    filter.status = "Active";
+  }
 
   let docs = await Group.find(filter).sort({ memberCount: -1 }).limit(100).lean();
   const { memberSet, createdByMeSet } = await loadGroupContext(opts.userId);
-
-  const tab = opts.tab ?? (opts.mine ? "my" : undefined);
 
   if (opts.userId && tab === "joined") {
     docs = docs.filter((d) => memberSet.has(d._id.toString()));
@@ -164,7 +170,10 @@ export async function discoverGroups(opts: { userId?: string; q?: string }) {
   const rx = q
     ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
     : null;
-  const filter = rx ? { $or: [{ name: rx }, { description: rx }] } : {};
+  const filter: Record<string, unknown> = {
+    status: "Active",
+    ...(rx ? { $or: [{ name: rx }, { description: rx }] } : {}),
+  };
 
   let docs = await Group.find(filter).sort({ memberCount: -1 }).limit(100).lean();
   const { memberSet, createdByMeSet } = await loadGroupContext(opts.userId);
@@ -184,6 +193,14 @@ export async function getGroup(groupId: string, userId?: string) {
     throw err;
   }
   const { memberSet, createdByMeSet } = await loadGroupContext(userId);
+  const isMemberOrOwner =
+    !!userId &&
+    (memberSet.has(groupId) || createdByMeSet.has(groupId));
+  if (g.status === "Suspended" && !isMemberOrOwner) {
+    const err = new Error("Group not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
   const mapped = mapGroup(g as GroupDoc, userId, memberSet, createdByMeSet);
 
   let myRole: GroupMemberRole | null = null;
@@ -224,6 +241,18 @@ export async function createGroup(
   });
 
   await GroupMember.create({ user: userId, group: g._id, role: "owner" });
+
+  const { recordAdminActivity } = await import(
+    "./admin/adminActivity.service.js"
+  );
+  void recordAdminActivity({
+    type: "group_created",
+    title: "New group created",
+    message: g.name,
+    refType: "group",
+    refId: g._id.toString(),
+    actorId: userId,
+  });
 
   return getGroup(g._id.toString(), userId);
 }
@@ -294,6 +323,9 @@ async function addGroupMemberDirect(groupId: string, userId: string) {
 export async function joinGroup(userId: string, groupId: string) {
   const g = await Group.findById(groupId);
   if (!g) throw httpError("Group not found", 404);
+  if (g.status === "Suspended") {
+    throw httpError("This group is suspended", 403);
+  }
 
   const ex = await GroupMember.findOne({ user: userId, group: groupId });
   if (ex) throw httpError("Already a member", 400);
@@ -318,18 +350,15 @@ export async function joinGroup(userId: string, groupId: string) {
     const notifyIds = new Set(admins.map((a) => a.user.toString()));
     if (ownerId) notifyIds.add(ownerId);
 
-    await Promise.all(
-      [...notifyIds].map((adminId) =>
-        Notification.create({
-          user: adminId,
-          title: "Join request",
-          body: `Someone requested to join ${g.name}`,
-          kind: "group_join_request",
-          refType: "group",
-          refId: groupId,
-        })
-      )
-    );
+    await notifyMany([...notifyIds], {
+      actorId: userId,
+      title: "Join request",
+      body: `Someone requested to join ${g.name}`,
+      kind: "group_join_request",
+      refType: "group",
+      refId: groupId,
+      category: "groupActivity",
+    });
 
     return { status: "pending" as const, message: "Join request submitted" };
   }
@@ -386,13 +415,14 @@ export async function approveJoinRequest(
   await request.save();
 
   const g = await Group.findById(groupId);
-  await Notification.create({
-    user: targetUserId,
+  await createNotification({
+    userId: targetUserId,
     title: "Join request approved",
     body: `You were approved to join ${g?.name ?? "the group"}`,
     kind: "group_join_approved",
     refType: "group",
     refId: groupId,
+    category: "groupActivity",
   });
 
   return { ok: true, userId: targetUserId, status: "approved" };
@@ -416,13 +446,14 @@ export async function rejectJoinRequest(
   await request.save();
 
   const g = await Group.findById(groupId);
-  await Notification.create({
-    user: targetUserId,
+  await createNotification({
+    userId: targetUserId,
     title: "Join request declined",
     body: `Your request to join ${g?.name ?? "the group"} was declined`,
     kind: "group_join_rejected",
     refType: "group",
     refId: groupId,
+    category: "groupActivity",
   });
 
   return { ok: true, userId: targetUserId, status: "rejected" };
@@ -587,13 +618,15 @@ export async function inviteToGroup(
     }
 
     invited += 1;
-    await Notification.create({
-      user: uid,
+    await createNotification({
+      userId: uid,
+      actorId: inviterId,
       title: "Group invite",
       body: `You were invited to join ${g.name}`,
       kind: "group_invite",
       refType: "group",
       refId: groupId,
+      category: "groupActivity",
     });
   }
 
@@ -751,13 +784,14 @@ export async function resendGroupInvite(
   invite.invitedBy = new mongoose.Types.ObjectId(actorId);
   await invite.save();
 
-  await Notification.create({
-    user: targetUserId,
+  await createNotification({
+    userId: targetUserId,
     title: "Group invite",
     body: `You were invited to join ${g.name}`,
     kind: "group_invite",
     refType: "group",
     refId: groupId,
+    category: "groupActivity",
   });
 
   return { invite: mapGroupInvite(invite.toObject()) };

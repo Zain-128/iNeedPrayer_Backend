@@ -6,15 +6,23 @@ import { createHttpServerWithSocket } from "./src/socket/httpServer.js";
 import { bootstrapActiveLiveSessions } from "./src/services/liveStream.service.js";
 import { startLiveStreamStaleJob } from "./src/jobs/liveStreamStaleJob.js";
 import { dbConnect } from "./src/configs/db.connect.js";
+import { ensureAdminUser } from "./src/seed/seedAdminUser.js";
 
 const start = async () => {
-  await dbConnect();
-  await bootstrapActiveLiveSessions();
-  startLiveStreamStaleJob();
+  // Bind PORT first so Hostinger health checks do not 503 while Mongo connects.
   const httpServer = createHttpServerWithSocket(app);
   httpServer.listen(Number(PORT), () => {
     console.log(`HTTP + Socket.IO on port ${PORT}`);
   });
+
+  try {
+    await dbConnect();
+    await ensureAdminUser();
+    await bootstrapActiveLiveSessions();
+    startLiveStreamStaleJob();
+  } catch (err) {
+    console.error("MongoDB connect failed; HTTP still listening:", err);
+  }
 };
 
 start().catch((err) => {

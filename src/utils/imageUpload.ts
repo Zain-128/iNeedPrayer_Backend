@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
 import { writeFile } from "fs/promises";
 import path from "path";
-import { isB2Configured, publicUrlForUpload, UPLOAD_ROOT } from "../contants.js";
+import { isB2Configured, publicUrlForUpload, PUBLIC_BASE_URL, UPLOAD_ROOT } from "../contants.js";
 import { uploadImageToB2 } from "./b2Storage.js";
 import { compressImage } from "./imageCompress.js";
 import { ensureUploadDir } from "./ensureUploadDir.js";
@@ -30,9 +30,11 @@ export async function saveUploadedImage(
   await writeFile(absPath, compressed);
   const urlPath = `/uploads/${name}`;
   const urls = publicUrlForUpload(urlPath);
+  // Prefer relative path in DB so clients can resolve against current API host.
+  // absoluteUrl is still returned for clients that want a full URL immediately.
   return {
-    url: urls.absoluteUrl ?? urls.url,
-    absoluteUrl: urls.absoluteUrl,
+    url: urlPath,
+    absoluteUrl: urls.absoluteUrl ?? (PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}${urlPath}` : undefined),
     storage: "local",
   };
 }

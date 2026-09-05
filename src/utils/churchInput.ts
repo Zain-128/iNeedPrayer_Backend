@@ -1,4 +1,9 @@
 /** Maps CreateChurchScreen / EditChurchScreen field names to API shape. */
+export type ChurchSocialLink = {
+  platform: string;
+  url: string;
+};
+
 export type NormalizedChurchInput = {
   name: string;
   website: string;
@@ -17,6 +22,10 @@ export type NormalizedChurchInput = {
   bannerImage: string;
   denomination: string;
   liveStreamUrl: string;
+  pastorName: string;
+  socialLinks: ChurchSocialLink[];
+  /** True when client sent `socialLinks` (even empty). */
+  socialLinksProvided: boolean;
 };
 
 export function buildLocationShort(parts: {
@@ -56,19 +65,35 @@ export function buildLocationFull(parts: {
     .join(", ");
 }
 
+function normalizeSocialLinks(raw: unknown): ChurchSocialLink[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const row = item as Record<string, unknown>;
+      const platform = String(row.platform ?? "").trim().toLowerCase();
+      const url = String(row.url ?? "").trim();
+      if (!platform || !url) return null;
+      return { platform, url };
+    })
+    .filter((x): x is ChurchSocialLink => !!x);
+}
+
 export function normalizeChurchInput(
   body: Record<string, unknown> | null | undefined
 ): NormalizedChurchInput {
-  const b = (body ?? {}) as Record<string, string | undefined>;
-  const country = (b.country ?? "").trim();
-  const state = (b.state ?? "").trim();
-  const city = (b.city ?? "").trim();
-  const streetAddress = (b.streetAddress ?? "").trim();
-  const landmark = (b.landmark ?? "").trim();
+  const b = (body ?? {}) as Record<string, unknown>;
+  const str = (key: string) => String(b[key] ?? "").trim();
+
+  const country = str("country");
+  const state = str("state");
+  const city = str("city");
+  const streetAddress = str("streetAddress");
+  const landmark = str("landmark");
 
   return {
-    name: (b.name ?? b.churchName ?? "").trim(),
-    website: (b.website ?? "").trim(),
+    name: str("name") || str("churchName"),
+    website: str("website"),
     country,
     state,
     city,
@@ -78,7 +103,7 @@ export function normalizeChurchInput(
       city,
       state,
       country,
-      locationShort: b.locationShort,
+      locationShort: str("locationShort"),
     }),
     locationFull: buildLocationFull({
       streetAddress,
@@ -86,16 +111,22 @@ export function normalizeChurchInput(
       city,
       state,
       country,
-      locationFull: b.locationFull,
+      locationFull: str("locationFull"),
     }),
-    email: (b.email ?? b.businessEmail ?? "").trim(),
-    phone: (b.phone ?? b.businessPhone ?? "").trim(),
-    shortBio: (b.shortBio ?? "").trim(),
-    about: (b.about ?? b.aboutChurch ?? "").trim(),
-    image: (b.image ?? b.logo ?? "").trim(),
-    bannerImage: (b.bannerImage ?? "").trim(),
-    denomination: (b.denomination ?? "").trim(),
-    liveStreamUrl: (b.liveStreamUrl ?? "").trim(),
+    email: str("email") || str("businessEmail"),
+    phone: str("phone") || str("businessPhone"),
+    shortBio: str("shortBio"),
+    about: str("about") || str("aboutChurch"),
+    image: str("image") || str("logo"),
+    bannerImage: str("bannerImage"),
+    denomination: str("denomination"),
+    liveStreamUrl: str("liveStreamUrl"),
+    pastorName:
+      str("pastorName") ||
+      str("pastorOrLeaderName") ||
+      str("pastor"),
+    socialLinks: normalizeSocialLinks(b.socialLinks),
+    socialLinksProvided: Array.isArray(b.socialLinks),
   };
 }
 

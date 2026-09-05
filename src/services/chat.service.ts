@@ -6,10 +6,10 @@ import {
 } from "../models/conversation.model.js";
 import { Message } from "../models/message.model.js";
 import { ConversationHide } from "../models/conversationHide.model.js";
-import { Notification } from "../models/notification.model.js";
 import { User } from "../models/user.model.js";
 import { UserBlock } from "../models/userBlock.model.js";
 import { timeAgo } from "../utils/timeAgo.js";
+import { createNotification } from "./notifications.service.js";
 
 type LeanMember = { _id: mongoose.Types.ObjectId; name: string; avatar?: string };
 
@@ -360,13 +360,15 @@ export async function persistInboundChatMessage(
 
   for (const mid of conv.members) {
     if (mid.toString() === senderId) continue;
-    await Notification.create({
-      user: mid,
+    await createNotification({
+      userId: mid.toString(),
+      actorId: senderId,
       title: "New message",
       body: trimmed.slice(0, 120),
       kind: "message",
       refType: "conversation",
       refId: conversationId,
+      category: "messages",
     });
   }
 

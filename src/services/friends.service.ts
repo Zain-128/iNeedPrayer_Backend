@@ -3,6 +3,7 @@ import { FriendRequest } from "../models/friendRequest.model.js";
 import { User } from "../models/user.model.js";
 import { UserBlock } from "../models/userBlock.model.js";
 import { mapAuthor } from "../utils/mappers.js";
+import { createNotification } from "./notifications.service.js";
 
 function httpError(message: string, statusCode: number) {
   const err = new Error(message);
@@ -21,8 +22,15 @@ async function assertNotBlocked(a: string, b: string) {
 }
 
 async function assertUserExists(userId: string) {
-  const exists = await User.exists({ _id: userId });
-  if (!exists) throw httpError("User not found", 404);
+  const u = await User.findById(userId).select("status role").lean();
+  if (!u || u.status === "blocked" || u.role === "admin") {
+    throw httpError("User not found", 404);
+  }
+}
+
+async function userDisplayName(userId: string) {
+  const u = await User.findById(userId).select("name").lean();
+  return u?.name?.trim() || "Someone";
 }
 
 export async function areFriends(userA: string, userB: string) {
@@ -53,6 +61,17 @@ export async function sendFriendRequest(fromId: string, toId: string) {
   if (reversePending) {
     reversePending.status = "accepted";
     await reversePending.save();
+    const accepterName = await userDisplayName(fromId);
+    await createNotification({
+      userId: toId,
+      actorId: fromId,
+      title: "Friend request accepted",
+      body: `${accepterName} accepted your friend request`,
+      kind: "friend_accepted",
+      refType: "user",
+      refId: fromId,
+      category: "friendRequests",
+    });
     return { status: "accepted" as const, message: "Friend request accepted" };
   }
 
@@ -69,6 +88,19 @@ export async function sendFriendRequest(fromId: string, toId: string) {
     { status: "pending" },
     { upsert: true, new: true }
   );
+
+  const senderName = await userDisplayName(fromId);
+  await createNotification({
+    userId: toId,
+    actorId: fromId,
+    title: "Friend request",
+    body: `${senderName} sent you a friend request`,
+    kind: "friend_request",
+    refType: "user",
+    refId: fromId,
+    category: "friendRequests",
+  });
+
   return { status: "pending" as const, message: "Friend request sent" };
 }
 
@@ -85,6 +117,19 @@ export async function acceptFriendRequest(accepterId: string, requesterId: strin
 
   row.status = "accepted";
   await row.save();
+
+  const accepterName = await userDisplayName(accepterId);
+  await createNotification({
+    userId: requesterId,
+    actorId: accepterId,
+    title: "Friend request accepted",
+    body: `${accepterName} accepted your friend request`,
+    kind: "friend_accepted",
+    refType: "user",
+    refId: accepterId,
+    category: "friendRequests",
+  });
+
   return { status: "accepted" as const, message: "Friend request accepted" };
 }
 

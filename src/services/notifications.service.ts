@@ -211,3 +211,84 @@ export async function muteNotifications(
 
   return mapSettings(doc!);
 }
+
+export type NotifyCategory =
+  | "friendRequests"
+  | "messages"
+  | "groupActivity"
+  | "postActivity"
+  | "prayersAndPraises";
+
+export type CreateNotificationInput = {
+  /** Recipient user id */
+  userId: string;
+  title: string;
+  body?: string;
+  kind: string;
+  refType?: string;
+  refId?: string;
+  /** Skip creating if actor === recipient */
+  actorId?: string;
+  /** Settings toggle to respect (default: allow) */
+  category?: NotifyCategory;
+};
+
+async function shouldNotify(
+  userId: string,
+  category?: NotifyCategory
+): Promise<boolean> {
+  const settings = await getNotificationSettings(userId);
+  if (settings.muted) return false;
+  if (!settings.pushEnabled) return false;
+  if (category && settings[category] === false) return false;
+  return true;
+}
+
+/**
+ * Create an in-app notification for a user.
+ * Respects mute / push / category settings. Never throws to callers.
+ */
+export async function createNotification(
+  input: CreateNotificationInput
+): Promise<string | null> {
+  try {
+    const {
+      userId,
+      title,
+      body = "",
+      kind,
+      refType = "",
+      refId = "",
+      actorId,
+      category,
+    } = input;
+
+    if (!userId || !title) return null;
+    if (actorId && actorId === userId) return null;
+    if (!(await shouldNotify(userId, category))) return null;
+
+    const doc = await Notification.create({
+      user: userId,
+      title,
+      body,
+      read: false,
+      kind,
+      refType,
+      refId,
+    });
+    return doc._id.toString();
+  } catch (err) {
+    console.error("createNotification failed:", err);
+    return null;
+  }
+}
+
+export async function notifyMany(
+  userIds: string[],
+  input: Omit<CreateNotificationInput, "userId">
+) {
+  const unique = [...new Set(userIds.filter(Boolean))];
+  await Promise.all(
+    unique.map((userId) => createNotification({ ...input, userId }))
+  );
+}

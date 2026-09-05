@@ -15,6 +15,10 @@ export interface IUser {
   followersCount: number;
   followingCount: number;
   postsCount: number;
+  role: "user" | "admin";
+  status: "active" | "inactive" | "blocked";
+  blockedReason: string;
+  blockedAt: Date | null;
   socialLoginProvider?: string | null;
   socialLoginId?: string | null;
   createdAt: Date;
@@ -52,6 +56,20 @@ const userSchema = new mongoose.Schema<IUser>(
     followersCount: { type: Number, default: 0 },
     followingCount: { type: Number, default: 0 },
     postsCount: { type: Number, default: 0 },
+    role: {
+      type: String,
+      enum: ["user", "admin"],
+      default: "user",
+      index: true,
+    },
+    status: {
+      type: String,
+      enum: ["active", "inactive", "blocked"],
+      default: "active",
+      index: true,
+    },
+    blockedReason: { type: String, default: "" },
+    blockedAt: { type: Date, default: null },
     socialLoginProvider: { type: String, default: null },
     socialLoginId: { type: String, default: null },
   },

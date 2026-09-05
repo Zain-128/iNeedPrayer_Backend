@@ -30,9 +30,12 @@ export const login = async (req: Request, res: Response) => {
     const result = await authService.login({ email, password });
     return res.status(200).json(result);
   } catch (err) {
-    const e = err as Error & { statusCode?: number };
+    const e = err as Error & { statusCode?: number; code?: string };
     const status = e.statusCode ?? 500;
-    return res.status(status).json({ message: e.message ?? "Login failed" });
+    return res.status(status).json({
+      message: e.message ?? "Login failed",
+      ...(e.code ? { code: e.code } : {}),
+    });
   }
 };
 
@@ -97,10 +100,11 @@ export const socialLogin = async (req: Request, res: Response) => {
       token: result.token,
     });
   } catch (err) {
-    const e = err as Error & { statusCode?: number };
+    const e = err as Error & { statusCode?: number; code?: string };
     const status = e.statusCode ?? 500;
-    return res
-      .status(status)
-      .json({ message: e.message ?? "Social login failed" });
+    return res.status(status).json({
+      message: e.message ?? "Social login failed",
+      ...(e.code ? { code: e.code } : {}),
+    });
   }
 };

@@ -1,8 +1,8 @@
 /**
- * Hostinger loads this file via require() (lsnode.js).
- * Do not use top-level await here — use compiled JS from dist/ instead.
+ * Hostinger Express preset: Entry file = index.js
+ * Root directory = iNeedPrayer_Backend
+ *
+ * `node index.js` loads ESM. If the host require()s this file (ERR_REQUIRE_ESM),
+ * set Entry file to index.cjs instead.
  */
-import("./dist/server.js").catch((err) => {
-  console.error("Failed to start app:", err);
-  process.exit(1);
-});
+import "./dist/server.js";

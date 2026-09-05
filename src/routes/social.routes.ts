@@ -4,6 +4,7 @@ import * as socialController from "../controllers/social.controller.js";
 
 const router = Router();
 
+router.get("/search", protect, socialController.search);
 router.post("/follow", protect, socialController.follow);
 router.post("/unfollow", protect, socialController.unfollow);
 router.get("/followers", protect, socialController.followers);

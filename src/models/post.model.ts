@@ -39,6 +39,12 @@ const postSchema = new mongoose.Schema(
     likesCount: { type: Number, default: 0 },
     commentsCount: { type: Number, default: 0 },
     sharesCount: { type: Number, default: 0 },
+    moderationStatus: {
+      type: String,
+      enum: ["Published", "Reported", "Hidden"],
+      default: "Published",
+      index: true,
+    },
   },
   { timestamps: true }
 );

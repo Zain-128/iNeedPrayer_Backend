@@ -13,9 +13,22 @@ export const LIVE_COMMENT_BATCH_MS = 400;
 /** Minimum interval between viewer-count broadcasts (ms). */
 export const LIVE_VIEWER_COUNT_THROTTLE_MS = 3000;
 
+/** How often to flush batched hearts to clients (ms). */
+export const LIVE_HEART_BATCH_MS = 250;
+
+/** Min gap between heart taps from the same user (ms). Soft spam control. */
+export const LIVE_HEART_COOLDOWN_MS = 80;
+
+/** Max heart bursts kept in a single batch payload. */
+export const LIVE_HEART_BURST_BUFFER = 20;
+
+/** Persist likeCount to DB at most this often (ms). */
+export const LIVE_HEART_DB_FLUSH_MS = 2000;
+
 type Bucket = { lastAt: number; count: number };
 
 const commentBuckets = new Map<string, Bucket>();
+const heartBuckets = new Map<string, Bucket>();
 
 export function checkCommentRateLimit(
   sessionId: string,
@@ -36,6 +49,25 @@ export function checkCommentRateLimit(
   return { ok: true };
 }
 
+export function checkHeartRateLimit(
+  sessionId: string,
+  userId: string
+): { ok: true } | { ok: false; retryAfterMs: number } {
+  const key = `${sessionId}:${userId}`;
+  const now = Date.now();
+  const prev = heartBuckets.get(key);
+
+  if (prev && now - prev.lastAt < LIVE_HEART_COOLDOWN_MS) {
+    return {
+      ok: false,
+      retryAfterMs: LIVE_HEART_COOLDOWN_MS - (now - prev.lastAt),
+    };
+  }
+
+  heartBuckets.set(key, { lastAt: now, count: (prev?.count ?? 0) + 1 });
+  return { ok: true };
+}
+
 export function clearCommentRateLimit(sessionId: string, userId: string) {
   commentBuckets.delete(`${sessionId}:${userId}`);
 }
@@ -45,5 +77,8 @@ export function pruneCommentRateLimits(maxAgeMs = 60_000) {
   const cutoff = Date.now() - maxAgeMs;
   for (const [key, bucket] of commentBuckets) {
     if (bucket.lastAt < cutoff) commentBuckets.delete(key);
+  }
+  for (const [key, bucket] of heartBuckets) {
+    if (bucket.lastAt < cutoff) heartBuckets.delete(key);
   }
 }

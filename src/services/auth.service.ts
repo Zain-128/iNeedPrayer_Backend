@@ -102,11 +102,33 @@ export const register = async (input: RegisterInput): Promise<AuthResult> => {
     name: input.name,
   });
   const token = signAccessToken(user._id.toString());
+
+  const { recordAdminActivity } = await import(
+    "./admin/adminActivity.service.js"
+  );
+  void recordAdminActivity({
+    type: "user_registered",
+    title: "New user registered",
+    message: `${user.name} joined the platform`,
+    refType: "user",
+    refId: user._id.toString(),
+    actorId: user._id.toString(),
+  });
+
   return {
     user: mapUser(user),
     token,
   };
 };
+
+function assertNotBlocked(user: { status?: string }) {
+  if (user.status === "blocked") {
+    const err = new Error("Account is blocked");
+    (err as Error & { statusCode?: number; code?: string }).statusCode = 403;
+    (err as Error & { code?: string }).code = "ACCOUNT_BLOCKED";
+    throw err;
+  }
+}
 
 export const login = async (input: LoginInput): Promise<AuthResult> => {
   const user = await User.findOne({ email: input.email.toLowerCase() }).select(
@@ -123,6 +145,7 @@ export const login = async (input: LoginInput): Promise<AuthResult> => {
     (err as Error & { statusCode?: number }).statusCode = 401;
     throw err;
   }
+  assertNotBlocked(user);
   const token = signAccessToken(user._id.toString());
   return {
     user: mapUser(user),
@@ -185,7 +208,22 @@ export const socialLogin = async (
       socialLoginProvider: provider,
       socialLoginId,
     });
+
+    const { recordAdminActivity } = await import(
+      "./admin/adminActivity.service.js"
+    );
+    void recordAdminActivity({
+      type: "user_registered",
+      title: "New user registered",
+      message: `${user.name} joined via ${provider}`,
+      refType: "user",
+      refId: user._id.toString(),
+      actorId: user._id.toString(),
+      meta: { provider },
+    });
   }
+
+  assertNotBlocked(user);
 
   const accessToken = signAccessToken(user._id.toString());
   const refreshToken = signRefreshToken(user._id.toString());
@@ -208,6 +246,7 @@ export const getMe = async (userId: string) => {
     (err as Error & { statusCode?: number }).statusCode = 404;
     throw err;
   }
+  assertNotBlocked(user);
   return user;
 };
 

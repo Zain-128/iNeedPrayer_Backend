@@ -88,6 +88,7 @@ function mapSession(
     title: session.title,
     status: session.status,
     viewerCount: session.viewerCount,
+    likeCount: session.likeCount ?? 0,
     hostUserId: session.hostUserId.toString(),
     hostName: host?.name ?? "Host",
     hostAvatar: host?.avatar ?? "",
@@ -348,6 +349,7 @@ export async function startLiveStream(opts: {
     title,
     status: "live",
     viewerCount: 0,
+    likeCount: 0,
     startedAt: new Date(),
     lastHeartbeatAt: new Date(),
   });
@@ -445,6 +447,22 @@ export async function incrementViewerCount(sessionId: string, delta: number) {
   await LiveStreamSession.findByIdAndUpdate(sessionId, {
     $inc: { viewerCount: delta },
   });
+}
+
+/** Batched DB write for hearts — call from socket layer. */
+export async function incrementLikeCount(sessionId: string, delta: number) {
+  if (!mongoose.isValidObjectId(sessionId) || delta <= 0) return;
+  await LiveStreamSession.findByIdAndUpdate(sessionId, {
+    $inc: { likeCount: delta },
+  });
+}
+
+export async function getSessionLikeCount(sessionId: string): Promise<number> {
+  if (!mongoose.isValidObjectId(sessionId)) return 0;
+  const s = await LiveStreamSession.findById(sessionId)
+    .select("likeCount")
+    .lean();
+  return s?.likeCount ?? 0;
 }
 
 const pendingViewerCounts = new Map<string, number>();

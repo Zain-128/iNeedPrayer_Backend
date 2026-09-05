@@ -9,17 +9,26 @@ import { GroupMember } from "../models/groupMember.model.js";
 import { ChurchMember } from "../models/churchMember.model.js";
 import { mapPost } from "../utils/mappers.js";
 import { buildPostTranslations } from "./translate.service.js";
+import { createNotification } from "./notifications.service.js";
 
 async function excludedAuthorIds(
   viewerId?: string
 ): Promise<mongoose.Types.ObjectId[]> {
-  if (!viewerId) return [];
+  const adminBlocked = await User.find({ status: "blocked" }).distinct("_id");
+  if (!viewerId) return adminBlocked as mongoose.Types.ObjectId[];
+
   const me = new mongoose.Types.ObjectId(viewerId);
   const [iBlocked, blockedMe] = await Promise.all([
     UserBlock.find({ blocker: me }).distinct("blocked"),
     UserBlock.find({ blocked: me }).distinct("blocker"),
   ]);
-  return [...iBlocked, ...blockedMe];
+  return [...iBlocked, ...blockedMe, ...adminBlocked] as mongoose.Types.ObjectId[];
+}
+
+function assertPostVisible(post: { moderationStatus?: string }) {
+  if (post.moderationStatus === "Hidden") {
+    throw httpError("Post not found", 404);
+  }
 }
 
 async function reactionFlags(userId: string | undefined, postIds: string[]) {
@@ -85,7 +94,9 @@ export async function listPosts(opts: {
   const skip = (page - 1) * limit;
 
   const exclude = await excludedAuthorIds(opts.viewerId);
-  const conditions: Record<string, unknown>[] = [];
+  const conditions: Record<string, unknown>[] = [
+    { moderationStatus: { $ne: "Hidden" } },
+  ];
 
   if (opts.authorId) {
     if (exclude.some((id) => id.toString() === opts.authorId)) {
@@ -116,11 +127,9 @@ export async function listPosts(opts: {
   }
 
   const filter =
-    conditions.length === 0
-      ? {}
-      : conditions.length === 1
-        ? conditions[0]
-        : { $and: conditions };
+    conditions.length === 1
+      ? conditions[0]
+      : { $and: conditions };
 
   const [total, docs] = await Promise.all([
     Post.countDocuments(filter),
@@ -129,6 +138,8 @@ export async function listPosts(opts: {
       .skip(skip)
       .limit(limit)
       .populate("author", "name avatar city state country")
+      .populate("group", "name image privacy")
+      .populate("church", "name image")
       .lean(),
   ]);
 
@@ -140,6 +151,7 @@ export async function listPosts(opts: {
       prayed: f.pray,
       praised: f.praise,
       liked: f.like,
+      viewerId: opts.viewerId,
       lang: opts.lang,
     });
   });
@@ -151,12 +163,15 @@ export async function getPost(postId: string, viewerId?: string, lang?: string) 
   const exclude = await excludedAuthorIds(viewerId);
   const post = await Post.findById(postId)
     .populate("author", "name avatar city state country")
+    .populate("group", "name image privacy")
+    .populate("church", "name image")
     .lean();
   if (!post) {
     const err = new Error("Post not found");
     (err as Error & { statusCode?: number }).statusCode = 404;
     throw err;
   }
+  assertPostVisible(post);
   if (
     exclude.some((id) => id.toString() === (post.author as { _id: mongoose.Types.ObjectId })._id.toString())
   ) {
@@ -170,6 +185,7 @@ export async function getPost(postId: string, viewerId?: string, lang?: string) 
     prayed: f.pray,
     praised: f.praise,
     liked: f.like,
+    viewerId,
     lang,
   });
 }
@@ -204,8 +220,28 @@ export async function createPost(
     church: body.churchId || null,
   });
   await User.findByIdAndUpdate(authorId, { $inc: { postsCount: 1 } });
+
+  const { recordAdminActivity } = await import(
+    "./admin/adminActivity.service.js"
+  );
+  const mode = body.mode === "praise" ? "praise" : "prayer";
+  void recordAdminActivity({
+    type: mode === "praise" ? "praise_created" : "prayer_created",
+    title:
+      mode === "praise"
+        ? "New praise created"
+        : "New prayer request created",
+    message: rawText.slice(0, 120) || "New post",
+    refType: "post",
+    refId: post._id.toString(),
+    actorId: authorId,
+    meta: { mode },
+  });
+
   const populated = await Post.findById(post._id)
     .populate("author", "name avatar city state country")
+    .populate("group", "name image privacy")
+    .populate("church", "name image")
     .lean();
   const flags = await reactionFlags(authorId, [String(post._id)]);
   const f = flags.get(String(post._id)) ?? { pray: false, praise: false, like: false };
@@ -213,6 +249,7 @@ export async function createPost(
     prayed: f.pray,
     praised: f.praise,
     liked: f.like,
+    viewerId: authorId,
   });
 }
 
@@ -246,6 +283,8 @@ export async function updatePost(
   await post.save();
   const populated = await Post.findById(post._id)
     .populate("author", "name avatar city state country")
+    .populate("group", "name image privacy")
+    .populate("church", "name image")
     .lean();
   const flags = await reactionFlags(authorId, [postId]);
   const f = flags.get(postId) ?? { pray: false, praise: false, like: false };
@@ -253,6 +292,7 @@ export async function updatePost(
     prayed: f.pray,
     praised: f.praise,
     liked: f.like,
+    viewerId: authorId,
   });
 }
 
@@ -285,6 +325,7 @@ export async function togglePray(postId: string, userId: string) {
     (err as Error & { statusCode?: number }).statusCode = 404;
     throw err;
   }
+  assertPostVisible(post);
   const existing = await PostReaction.findOne({
     post: postId,
     user: userId,
@@ -299,6 +340,17 @@ export async function togglePray(postId: string, userId: string) {
   await PostReaction.create({ post: postId, user: userId, type: "pray" });
   post.praysCount += 1;
   await post.save();
+  const actor = await User.findById(userId).select("name").lean();
+  await createNotification({
+    userId: post.author.toString(),
+    actorId: userId,
+    title: "New prayer",
+    body: `${actor?.name?.trim() || "Someone"} prayed for your post`,
+    kind: "pray",
+    refType: "post",
+    refId: postId,
+    category: "prayersAndPraises",
+  });
   return { active: true, praysCount: post.praysCount };
 }
 
@@ -309,6 +361,7 @@ export async function togglePraise(postId: string, userId: string) {
     (err as Error & { statusCode?: number }).statusCode = 404;
     throw err;
   }
+  assertPostVisible(post);
   const existing = await PostReaction.findOne({
     post: postId,
     user: userId,
@@ -323,12 +376,24 @@ export async function togglePraise(postId: string, userId: string) {
   await PostReaction.create({ post: postId, user: userId, type: "praise" });
   post.praisesCount += 1;
   await post.save();
+  const actor = await User.findById(userId).select("name").lean();
+  await createNotification({
+    userId: post.author.toString(),
+    actorId: userId,
+    title: "New praise",
+    body: `${actor?.name?.trim() || "Someone"} praised your post`,
+    kind: "praise",
+    refType: "post",
+    refId: postId,
+    category: "prayersAndPraises",
+  });
   return { active: true, praisesCount: post.praisesCount };
 }
 
 export async function toggleLike(postId: string, userId: string) {
   const post = await Post.findById(postId);
   if (!post) throw httpError("Post not found", 404);
+  assertPostVisible(post);
   const existing = await PostReaction.findOne({
     post: postId,
     user: userId,
@@ -343,12 +408,24 @@ export async function toggleLike(postId: string, userId: string) {
   await PostReaction.create({ post: postId, user: userId, type: "like" });
   post.likesCount += 1;
   await post.save();
+  const actor = await User.findById(userId).select("name").lean();
+  await createNotification({
+    userId: post.author.toString(),
+    actorId: userId,
+    title: "New like",
+    body: `${actor?.name?.trim() || "Someone"} liked your post`,
+    kind: "like",
+    refType: "post",
+    refId: postId,
+    category: "postActivity",
+  });
   return { liked: true, likesCount: post.likesCount };
 }
 
 export async function unlikePost(postId: string, userId: string) {
   const post = await Post.findById(postId);
   if (!post) throw httpError("Post not found", 404);
+  assertPostVisible(post);
   const existing = await PostReaction.findOne({
     post: postId,
     user: userId,
@@ -362,16 +439,15 @@ export async function unlikePost(postId: string, userId: string) {
 }
 
 export async function incrementShare(postId: string) {
-  const post = await Post.findByIdAndUpdate(
-    postId,
-    { $inc: { sharesCount: 1 } },
-    { new: true }
-  );
+  const post = await Post.findById(postId);
   if (!post) {
     const err = new Error("Post not found");
     (err as Error & { statusCode?: number }).statusCode = 404;
     throw err;
   }
+  assertPostVisible(post);
+  post.sharesCount += 1;
+  await post.save();
   return { sharesCount: post.sharesCount };
 }
 

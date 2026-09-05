@@ -55,6 +55,8 @@ type ChurchDoc = mongoose.FlattenMaps<Record<string, unknown>> & {
   shortBio?: string;
   about?: string;
   liveStreamUrl?: string;
+  pastorName?: string;
+  socialLinks?: Array<{ platform?: string; url?: string }>;
   isVerified?: boolean;
   createdBy?: mongoose.Types.ObjectId | null;
 };
@@ -98,8 +100,21 @@ function mapChurch(
 ) {
   const id = c._id.toString();
   const banner = c.bannerImage ?? "";
+  const image = c.image ?? "";
+  const email = c.email ?? "";
+  const phone = c.phone ?? "";
+  const about = c.about ?? "";
+  const pastorName = c.pastorName ?? "";
+  const socialLinks = (c.socialLinks ?? [])
+    .filter((s) => s?.platform && s?.url)
+    .map((s) => ({
+      platform: String(s.platform).trim(),
+      url: String(s.url).trim(),
+    }));
+
   return {
     id,
+    // Canonical fields
     name: c.name,
     locationShort: c.locationShort ?? "",
     locationFull: c.locationFull ?? "",
@@ -110,16 +125,18 @@ function mapChurch(
     landmark: c.landmark ?? "",
     followersLabel: formatCountLabel(c.followerCount ?? 0, "followers"),
     membersLabel: formatCountLabel(c.memberCount ?? 1, "members"),
-    image: c.image ?? "",
+    image,
     bannerImage: banner,
     banner,
     website: c.website ?? "",
-    email: c.email ?? "",
-    phone: c.phone ?? "",
+    email,
+    phone,
     denomination: c.denomination ?? "",
     shortBio: c.shortBio ?? "",
-    about: c.about ?? "",
+    about,
     liveStreamUrl: c.liveStreamUrl ?? "",
+    pastorName,
+    socialLinks,
     isVerified: !!c.isVerified,
     isFollowed: userId && followedSet ? followedSet.has(id) : false,
     isMyChurch:
@@ -128,6 +145,14 @@ function mapChurch(
         : c.createdBy?.toString() === userId,
     followerCount: c.followerCount ?? 0,
     memberCount: c.memberCount ?? 1,
+
+    // UI aliases (CreateChurch / EditChurch payload shape)
+    churchName: c.name,
+    businessEmail: email,
+    businessPhone: phone,
+    pastorOrLeaderName: pastorName,
+    aboutChurch: about,
+    logo: image,
   };
 }
 
@@ -171,7 +196,7 @@ export async function listChurches(opts: {
   const rx = q
     ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
     : null;
-  const mongoFilter = rx
+  const mongoFilter: Record<string, unknown> = rx
     ? {
         $or: [
           { name: rx },
@@ -182,6 +207,11 @@ export async function listChurches(opts: {
         ],
       }
     : {};
+
+  // Public browse only shows approved churches; "my" / "followed" keep owner's view
+  if (opts.tab !== "my" && opts.tab !== "followed") {
+    mongoFilter.status = "Approved";
+  }
 
   let docs = await Church.find(mongoFilter).sort(sort).limit(100).lean();
 
@@ -204,11 +234,14 @@ export async function discoverChurches(opts: { userId?: string; q?: string }) {
   const rx = q
     ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
     : null;
-  const mongoFilter = rx
-    ? {
-        $or: [{ name: rx }, { locationShort: rx }, { city: rx }],
-      }
-    : {};
+  const mongoFilter: Record<string, unknown> = {
+    status: "Approved",
+    ...(rx
+      ? {
+          $or: [{ name: rx }, { locationShort: rx }, { city: rx }],
+        }
+      : {}),
+  };
 
   let docs = await Church.find(mongoFilter)
     .sort({ followerCount: -1 })
@@ -238,6 +271,15 @@ export async function getChurch(id: string, userId?: string) {
     throw err;
   }
   const { followedSet, myChurchSet } = await loadUserContext(userId);
+  const isMine = userId ? myChurchSet.has(c._id.toString()) : false;
+  if (
+    (c.status === "Suspended" || c.status === "Rejected") &&
+    !isMine
+  ) {
+    const err = new Error("Church not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
   return mapChurch(c as ChurchDoc, userId, followedSet, myChurchSet);
 }
 
@@ -264,13 +306,21 @@ function applyNormalizedToChurch(
     "bannerImage",
     "denomination",
     "liveStreamUrl",
+    "pastorName",
   ];
   for (const f of fields) {
     const v = input[f];
+    if (typeof v !== "string") continue;
     if (partial && v === "") continue;
     if (!partial || v !== undefined) {
       (church as unknown as Record<string, string>)[f] = v;
     }
+  }
+
+  // socialLinks: on create always set; on PATCH only if client sent the key
+  if (!partial || input.socialLinksProvided) {
+    (church as unknown as Record<string, unknown>).socialLinks =
+      input.socialLinks ?? [];
   }
 }
 
@@ -302,8 +352,25 @@ export async function createChurch(
     (code !== null && code === CHURCH_VERIFY_CODE);
 
   const c = await Church.create({
-    ...input,
     name: input.name,
+    website: input.website,
+    country: input.country,
+    state: input.state,
+    city: input.city,
+    streetAddress: input.streetAddress,
+    landmark: input.landmark,
+    locationShort: input.locationShort,
+    locationFull: input.locationFull,
+    email: input.email,
+    phone: input.phone,
+    shortBio: input.shortBio,
+    about: input.about,
+    image: input.image,
+    bannerImage: input.bannerImage,
+    denomination: input.denomination,
+    liveStreamUrl: input.liveStreamUrl,
+    pastorName: input.pastorName,
+    socialLinks: input.socialLinks,
     isVerified: !!isVerified,
     verificationCode: isVerified ? null : code,
     verificationCodeExpiresAt: isVerified
@@ -320,6 +387,22 @@ export async function createChurch(
   });
 
   const church = await getChurch(c._id.toString(), userId);
+
+  const { recordAdminActivity } = await import(
+    "./admin/adminActivity.service.js"
+  );
+  void recordAdminActivity({
+    type: isVerified ? "church_created" : "church_pending",
+    title: isVerified
+      ? "New church created"
+      : "New church pending verification",
+    message: c.name,
+    refType: "church",
+    refId: c._id.toString(),
+    actorId: userId,
+    meta: { isVerified: !!isVerified },
+  });
+
   return {
     church,
     verificationRequired: !isVerified,

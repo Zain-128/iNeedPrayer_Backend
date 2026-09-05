@@ -17,10 +17,16 @@ import blockRoutes from "./routes/block.routes.js";
 import socialRoutes from "./routes/social.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
 import liveStreamRoutes from "./routes/liveStream.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
 import { dbConnect } from "./configs/db.connect.js";
 import { ALLOWED_ORIGINS, UPLOAD_ROOT } from "./contants.js";
+import { ensureUploadDir } from "./utils/ensureUploadDir.js";
 
 const app = express();
+
+void ensureUploadDir()
+  .then(() => console.log(`Uploads dir ready: ${UPLOAD_ROOT}`))
+  .catch((err) => console.error("Could not create uploads dir:", err));
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -47,7 +53,17 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use("/uploads", express.static(UPLOAD_ROOT));
+app.use(
+  "/uploads",
+  express.static(UPLOAD_ROOT, {
+    fallthrough: true,
+    maxAge: "7d",
+    setHeaders(res) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    },
+  })
+);
 
 // Ensure DB is connected (needed for Vercel serverless; no-op after first connect)
 let dbConnected = false;
@@ -79,6 +95,7 @@ app.use("/api/friends", friendsRoutes);
 app.use("/api/block", blockRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/live", liveStreamRoutes);
+app.use("/api/admin", adminRoutes);
 app.use("/api", socialRoutes);
 
 app.get("/health", (_req, res) => {

@@ -2,7 +2,9 @@ import mongoose from "mongoose";
 import { Comment } from "../models/comment.model.js";
 import { CommentReaction } from "../models/commentReaction.model.js";
 import { Post } from "../models/post.model.js";
+import { User } from "../models/user.model.js";
 import { mapCommentTree, type CommentLean } from "../utils/mappers.js";
+import { createNotification } from "./notifications.service.js";
 
 function httpError(message: string, statusCode: number) {
   const err = new Error(message);
@@ -39,6 +41,7 @@ async function commentReactionFlags(
 export async function listCommentsForPost(postId: string, viewerId?: string) {
   const post = await Post.findById(postId).lean();
   if (!post) throw httpError("Post not found", 404);
+  if (post.moderationStatus === "Hidden") throw httpError("Post not found", 404);
 
   const all = await Comment.find({ post: postId })
     .sort({ createdAt: 1 })
@@ -60,7 +63,7 @@ export async function listCommentsForPost(postId: string, viewerId?: string) {
       replyMap.set(pid, arr);
     }
   }
-  return top.map((c) => mapCommentTree(c, replyMap, flags));
+  return top.map((c) => mapCommentTree(c, replyMap, flags, viewerId));
 }
 
 export async function addComment(
@@ -71,6 +74,7 @@ export async function addComment(
 ) {
   const post = await Post.findById(postId);
   if (!post) throw httpError("Post not found", 404);
+  if (post.moderationStatus === "Hidden") throw httpError("Post not found", 404);
 
   let parentComment: mongoose.Types.ObjectId | null = null;
   if (parentCommentId) {
@@ -90,6 +94,50 @@ export async function addComment(
   });
   post.commentsCount += 1;
   await post.save();
+
+  const actor = await User.findById(authorId).select("name").lean();
+  const actorName = actor?.name?.trim() || "Someone";
+  const snippet = text.trim().slice(0, 100);
+
+  await createNotification({
+    userId: post.author.toString(),
+    actorId: authorId,
+    title: "New comment",
+    body: `${actorName} commented: ${snippet}`,
+    kind: "comment",
+    refType: "post",
+    refId: postId,
+    category: "postActivity",
+  });
+
+  const { recordAdminActivity } = await import(
+    "./admin/adminActivity.service.js"
+  );
+  void recordAdminActivity({
+    type: "comment_created",
+    title: "User commented on a post",
+    message: `${actorName}: ${snippet}`,
+    refType: "post",
+    refId: postId,
+    actorId: authorId,
+  });
+
+  if (parentComment) {
+    const parent = await Comment.findById(parentComment).select("author").lean();
+    if (parent?.author) {
+      await createNotification({
+        userId: parent.author.toString(),
+        actorId: authorId,
+        title: "New reply",
+        body: `${actorName} replied: ${snippet}`,
+        kind: "comment_reply",
+        refType: "post",
+        refId: postId,
+        category: "postActivity",
+      });
+    }
+  }
+
   return listCommentsForPost(postId, authorId);
 }
 
@@ -115,7 +163,7 @@ export async function editComment(
 
   const flags = await commentReactionFlags(userId, [commentId]);
   const lean = comment.toObject() as unknown as CommentLean;
-  return mapCommentTree(lean, new Map(), flags);
+  return mapCommentTree(lean, new Map(), flags, userId);
 }
 
 async function deleteSubtree(commentId: mongoose.Types.ObjectId): Promise<number> {

@@ -5,7 +5,7 @@ import { User } from "../models/user.model.js";
 import { persistInboundChatMessage } from "../services/chat.service.js";
 import { broadcastNewMessage, broadcastChatUpdated } from "./chat.emit.js";
 
-type CachedProfile = { name: string; avatar: string; at: number };
+type CachedProfile = { name: string; avatar: string; status: string; at: number };
 const userProfileCache = new Map<string, CachedProfile>();
 const USER_PROFILE_CACHE_MS = 5 * 60_000;
 
@@ -14,10 +14,11 @@ async function loadUserProfile(userId: string): Promise<CachedProfile> {
   if (cached && Date.now() - cached.at < USER_PROFILE_CACHE_MS) {
     return cached;
   }
-  const user = await User.findById(userId).select("name avatar").lean();
+  const user = await User.findById(userId).select("name avatar status").lean();
   const profile: CachedProfile = {
     name: user?.name ?? "User",
     avatar: user?.avatar ?? "",
+    status: user?.status ?? "active",
     at: Date.now(),
   };
   userProfileCache.set(userId, profile);
@@ -36,6 +37,9 @@ export function registerChatSocket(io: Server) {
     try {
       const { userId } = verifyAccessToken(raw);
       const profile = await loadUserProfile(userId);
+      if (profile.status === "blocked") {
+        return next(new Error("account_blocked"));
+      }
       const data = socket.data as {
         userId?: string;
         userName?: string;

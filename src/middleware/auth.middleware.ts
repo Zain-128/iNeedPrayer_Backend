@@ -25,6 +25,12 @@ export const protect = async (
     if (!user) {
       return res.status(401).json({ message: "User no longer exists" });
     }
+    if (user.status === "blocked") {
+      return res.status(403).json({
+        message: "Account is blocked",
+        code: "ACCOUNT_BLOCKED",
+      });
+    }
     req.userId = userId;
     req.user = user;
     next();

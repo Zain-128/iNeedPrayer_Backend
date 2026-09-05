@@ -5,6 +5,7 @@ import { UserBlock } from "../models/userBlock.model.js";
 import { FriendRequest } from "../models/friendRequest.model.js";
 import { formatCountLabel, mapAuthor } from "../utils/mappers.js";
 import { getFriendRequestStatus } from "./friends.service.js";
+import { createNotification } from "./notifications.service.js";
 
 export async function getMyProfile(userId: string) {
   const u = await User.findById(userId).lean();
@@ -153,7 +154,7 @@ export async function getPublicProfile(viewerId: string | undefined, userId: str
     }
   }
   const u = await User.findById(userId).lean();
-  if (!u) {
+  if (!u || u.status === "blocked" || u.role === "admin") {
     const err = new Error("User not found");
     (err as Error & { statusCode?: number }).statusCode = 404;
     throw err;
@@ -190,6 +191,8 @@ export async function searchUsers(q: string, viewerId: string, limit = 30) {
   const hide = await getBlockedUserIds(viewerId);
   const users = await User.find({
     _id: { $ne: viewerId },
+    role: { $ne: "admin" },
+    status: { $ne: "blocked" },
     $or: [{ name: rx }, { email: rx }],
   })
     .limit(limit)
@@ -217,6 +220,12 @@ export async function toggleFollow(followerId: string, targetUserId: string) {
     (err as Error & { statusCode?: number }).statusCode = 403;
     throw err;
   }
+  const target = await User.findById(targetUserId).select("status role").lean();
+  if (!target || target.status === "blocked" || target.role === "admin") {
+    const err = new Error("User not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
   const existing = await UserFollow.findOne({
     follower: followerId,
     following: targetUserId,
@@ -230,6 +239,17 @@ export async function toggleFollow(followerId: string, targetUserId: string) {
   await UserFollow.create({ follower: followerId, following: targetUserId });
   await User.findByIdAndUpdate(followerId, { $inc: { followingCount: 1 } });
   await User.findByIdAndUpdate(targetUserId, { $inc: { followersCount: 1 } });
+  const follower = await User.findById(followerId).select("name").lean();
+  await createNotification({
+    userId: targetUserId,
+    actorId: followerId,
+    title: "New follower",
+    body: `${follower?.name?.trim() || "Someone"} started following you`,
+    kind: "follow",
+    refType: "user",
+    refId: followerId,
+    category: "postActivity",
+  });
   return { following: true };
 }
 
@@ -250,6 +270,12 @@ export async function followUser(followerId: string, targetUserId: string) {
     (err as Error & { statusCode?: number }).statusCode = 403;
     throw err;
   }
+  const target = await User.findById(targetUserId).select("status role").lean();
+  if (!target || target.status === "blocked" || target.role === "admin") {
+    const err = new Error("User not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
   const existing = await UserFollow.findOne({
     follower: followerId,
     following: targetUserId,
@@ -258,6 +284,17 @@ export async function followUser(followerId: string, targetUserId: string) {
   await UserFollow.create({ follower: followerId, following: targetUserId });
   await User.findByIdAndUpdate(followerId, { $inc: { followingCount: 1 } });
   await User.findByIdAndUpdate(targetUserId, { $inc: { followersCount: 1 } });
+  const follower = await User.findById(followerId).select("name").lean();
+  await createNotification({
+    userId: targetUserId,
+    actorId: followerId,
+    title: "New follower",
+    body: `${follower?.name?.trim() || "Someone"} started following you`,
+    kind: "follow",
+    refType: "user",
+    refId: followerId,
+    category: "postActivity",
+  });
   return { following: true, message: "Following" };
 }
 

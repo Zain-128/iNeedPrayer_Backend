@@ -39,25 +39,36 @@ Local base URL example: `http://localhost:3004`
 {
   "id": "665f1a2b3c4d5e6f7a8b9c0d",
   "name": "Grace Community Church",
-  "locationShort": "Houston, TX",
-  "locationFull": "3700 Southwest Fwy, Near Greenway Plaza, Houston, Texas, United States",
+  "churchName": "Grace Community Church",
+  "locationShort": "Los Angeles, California",
+  "locationFull": "123 Main Street, Near Central Park, Los Angeles, California, United States",
   "country": "United States",
-  "state": "Texas",
-  "city": "Houston",
-  "streetAddress": "3700 Southwest Fwy",
-  "landmark": "Near Greenway Plaza",
+  "state": "California",
+  "city": "Los Angeles",
+  "streetAddress": "123 Main Street",
+  "landmark": "Near Central Park",
   "followersLabel": "12.4k followers",
   "membersLabel": "3 members",
-  "image": "https://.../logo.png",
-  "bannerImage": "https://.../banner.jpg",
-  "banner": "https://.../banner.jpg",
-  "website": "https://example.com",
-  "email": "info@church.com",
-  "phone": "+1 713-555-0100",
-  "denomination": "Non-denominational",
-  "shortBio": "One line summary",
-  "about": "Long description",
-  "liveStreamUrl": "https://...",
+  "image": "https://domain.com/uploads/church-logo.jpg",
+  "logo": "https://domain.com/uploads/church-logo.jpg",
+  "bannerImage": "https://domain.com/uploads/church-banner.jpg",
+  "banner": "https://domain.com/uploads/church-banner.jpg",
+  "website": "https://gracechurch.org",
+  "email": "info@gracechurch.org",
+  "businessEmail": "info@gracechurch.org",
+  "phone": "+1 555 123 4567",
+  "businessPhone": "+1 555 123 4567",
+  "pastorName": "John Smith",
+  "pastorOrLeaderName": "John Smith",
+  "shortBio": "A welcoming church community.",
+  "about": "Grace Community Church serves the local community...",
+  "aboutChurch": "Grace Community Church serves the local community...",
+  "socialLinks": [
+    { "platform": "facebook", "url": "https://facebook.com/gracechurch" },
+    { "platform": "instagram", "url": "https://instagram.com/gracechurch" },
+    { "platform": "youtube", "url": "https://youtube.com/@gracechurch" }
+  ],
+  "liveStreamUrl": "",
   "isVerified": true,
   "isFollowed": false,
   "isMyChurch": true,
@@ -66,7 +77,7 @@ Local base URL example: `http://localhost:3004`
 }
 ```
 
-`banner` is an alias of `bannerImage` (for `ChurchDetailScreen`).
+Aliases (`churchName`, `logo`, `businessEmail`, `businessPhone`, `pastorOrLeaderName`, `aboutChurch`) mirror the create/edit form fields.
 
 ---
 
@@ -81,11 +92,39 @@ The backend accepts **either** API names or UI names:
 | `businessPhone` | `phone` |
 | `aboutChurch` | `about` |
 | `logo` | `image` |
+| `pastorOrLeaderName` | `pastorName` |
 | `bannerImage` | `bannerImage` |
+| `socialLinks` | `socialLinks` `[{ platform, url }]` |
 | `country`, `state`, `city`, `streetAddress`, `landmark` | same |
 | `website`, `shortBio` | same |
 
 `locationShort` / `locationFull` are auto-built from city/state/country/address if omitted.
+
+**Example create body:**
+
+```json
+{
+  "churchName": "Grace Community Church",
+  "website": "https://gracechurch.org",
+  "country": "United States",
+  "state": "California",
+  "city": "Los Angeles",
+  "streetAddress": "123 Main Street",
+  "landmark": "Near Central Park",
+  "businessEmail": "info@gracechurch.org",
+  "businessPhone": "+1 555 123 4567",
+  "pastorOrLeaderName": "John Smith",
+  "shortBio": "A welcoming church community.",
+  "aboutChurch": "Grace Community Church serves the local community through worship, prayer, outreach and fellowship.",
+  "logo": "https://domain.com/uploads/church-logo.jpg",
+  "bannerImage": "https://domain.com/uploads/church-banner.jpg",
+  "socialLinks": [
+    { "platform": "facebook", "url": "https://facebook.com/gracechurch" },
+    { "platform": "instagram", "url": "https://instagram.com/gracechurch" },
+    { "platform": "youtube", "url": "https://youtube.com/@gracechurch" }
+  ]
+}
+```
 
 ---
 
