@@ -121,7 +121,12 @@ export const register = async (input: RegisterInput): Promise<AuthResult> => {
   };
 };
 
-function assertNotBlocked(user: { status?: string }) {
+function assertNotBlocked(user: { status?: string; deletedAt?: Date | null }) {
+  if (user.deletedAt) {
+    const err = new Error("Account has been deleted");
+    (err as Error & { statusCode?: number }).statusCode = 403;
+    throw err;
+  }
   if (user.status === "blocked") {
     const err = new Error("Account is blocked");
     (err as Error & { statusCode?: number; code?: string }).statusCode = 403;
@@ -287,4 +292,36 @@ export const resetPassword = async (
 
   user.password = newPassword;
   await user.save();
+};
+
+export const deleteAccount = async (userId: string): Promise<{ message: string }> => {
+  const user = await User.findById(userId);
+  if (!user) {
+    const err = new Error("User not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  if (user.deletedAt) {
+    const err = new Error("Account is already deleted");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  user.deletedAt = new Date();
+  user.status = "inactive";
+  await user.save();
+
+  const { recordAdminActivity } = await import(
+    "./admin/adminActivity.service.js"
+  );
+  void recordAdminActivity({
+    type: "user_deleted",
+    title: "User deleted account",
+    message: `${user.name} soft-deleted their account`,
+    refType: "user",
+    refId: userId,
+    actorId: userId,
+  });
+
+  return { message: "Account deleted successfully" };
 };

@@ -87,6 +87,55 @@ export const leaveGroup = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const removeMember = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    const targetUserId = paramStr(req.params.userId);
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(targetUserId)) {
+      return res.status(400).json({ message: "Invalid id" });
+    }
+    const result = await chatService.removeMemberFromGroup(id, req.userId, targetUserId);
+    const io = getIo();
+    if (io) {
+      if (result.deleted) {
+        io.to(`user:${targetUserId}`).emit("conversation-deleted", {
+          conversationId: id,
+        });
+      } else {
+        await broadcastChatUpdated(io, id);
+      }
+    }
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const addMembers = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid id" });
+    }
+    const { memberIds } = req.body ?? {};
+    if (!Array.isArray(memberIds)) {
+      return res.status(400).json({ message: "memberIds array required" });
+    }
+    const result = await chatService.addMembersToGroup(id, req.userId, memberIds);
+    const io = getIo();
+    if (io && result.added) {
+      await broadcastChatUpdated(io, id);
+    }
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
 export const listMessages = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });

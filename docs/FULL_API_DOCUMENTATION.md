@@ -280,6 +280,20 @@ Create account.
 
 ---
 
+### POST /api/auth/delete-account 🔒
+
+Soft-deletes the authenticated user's account. Sets `deletedAt` timestamp and changes `status` to `"inactive"`. The account can no longer log in or appear in searches.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Success `200`:** `{ "message": "Account deleted successfully" }`
+
+**Errors:**
+- `401` — not authenticated
+- `400` — account already deleted
+
+---
+
 ### GET /api/auth/me 🔒
 
 Basic auth user (minimal fields).
@@ -1290,12 +1304,14 @@ or
 
 **Query:** `q`
 
+Returns users who are not already members or pending invitees. Each user includes their friend count.
+
 **Success `200`**
 
 ```json
 {
   "users": [
-    { "id": "...", "name": "John", "avatar": "...", "email": "john@example.com" }
+    { "id": "...", "name": "John", "avatar": "...", "email": "john@example.com", "friendCount": 12 }
   ]
 }
 ```
@@ -1736,7 +1752,8 @@ curl https://your-domain.com/api/test/ping
 | 6 | POST | `/api/auth/social-login` |
 | 7 | POST | `/api/auth/forgot-password` |
 | 8 | POST | `/api/auth/reset-password` |
-| 9 | GET | `/api/auth/me` |
+| 9 | POST | `/api/auth/delete-account` |
+| 10 | GET | `/api/auth/me` |
 | 10 | GET | `/api/profile/me` |
 | 11 | PATCH | `/api/profile/me` |
 | 12 | POST | `/api/profile/me/avatar` |
@@ -1830,4 +1847,41 @@ Plus: **Socket.IO** events, **static** `/uploads/*`
 
 ---
 
-*Document version: June 2026 — matches `src/app.ts` route registration.*
+## Admin APIs (Dashboard)
+
+All admin routes are under `/api/admin` and require `Authorization: Bearer <admin-token>`.
+
+### Events
+
+| # | Method | Endpoint |
+|---|--------|----------|
+| 98 | GET | `/api/admin/events` |
+| 99 | POST | `/api/admin/events` |
+| 100 | GET | `/api/admin/events/:id` |
+| 101 | PATCH | `/api/admin/events/:id` |
+| 102 | DELETE | `/api/admin/events/:id` |
+| 103 | POST | `/api/admin/events/:id/cancel` |
+
+### Push Notifications
+
+| # | Method | Endpoint |
+|---|--------|----------|
+| 104 | GET | `/api/admin/push-notifications` |
+| 105 | POST | `/api/admin/push-notifications` |
+| 106 | GET | `/api/admin/push-notifications/:id` |
+| 107 | PATCH | `/api/admin/push-notifications/:id` |
+| 108 | DELETE | `/api/admin/push-notifications/:id` |
+| 109 | POST | `/api/admin/push-notifications/:id/send` |
+
+### Settings
+
+| # | Method | Endpoint |
+|---|--------|----------|
+| 110 | GET | `/api/admin/settings` |
+| 111 | PATCH | `/api/admin/settings` |
+| 112 | GET | `/api/admin/settings/notifications` |
+| 113 | PATCH | `/api/admin/settings/notifications` |
+
+---
+
+*Document version: September 2026 — matches `src/routes/admin.routes.ts`.*

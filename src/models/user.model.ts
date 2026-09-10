@@ -19,6 +19,7 @@ export interface IUser {
   status: "active" | "inactive" | "blocked";
   blockedReason: string;
   blockedAt: Date | null;
+  deletedAt: Date | null;
   socialLoginProvider?: string | null;
   socialLoginId?: string | null;
   createdAt: Date;
@@ -70,6 +71,7 @@ const userSchema = new mongoose.Schema<IUser>(
     },
     blockedReason: { type: String, default: "" },
     blockedAt: { type: Date, default: null },
+    deletedAt: { type: Date, default: null },
     socialLoginProvider: { type: String, default: null },
     socialLoginId: { type: String, default: null },
   },
@@ -85,6 +87,8 @@ userSchema.index(
     },
   }
 );
+
+userSchema.index({ deletedAt: 1 });
 
 userSchema.virtual("locationLabel").get(function () {
   const parts = [this.city, this.state, this.country].filter(Boolean);

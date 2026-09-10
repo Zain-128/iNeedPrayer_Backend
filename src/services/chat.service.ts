@@ -229,6 +229,106 @@ export async function leaveGroupConversation(
   return { left: true, deleted: false };
 }
 
+export async function removeMemberFromGroup(
+  conversationId: string,
+  actorId: string,
+  targetUserId: string
+) {
+  if (!mongoose.isValidObjectId(conversationId) || !mongoose.isValidObjectId(targetUserId)) {
+    const err = new Error("Invalid id");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (actorId === targetUserId) {
+    const err = new Error("Cannot remove yourself");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  const conv = await Conversation.findById(conversationId);
+  if (!conv) {
+    const err = new Error("Conversation not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  if (conv.kind !== "group") {
+    const err = new Error("Not a group conversation");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (!conv.admins.some((a) => a.toString() === actorId)) {
+    const err = new Error("Only admins can remove members");
+    (err as Error & { statusCode?: number }).statusCode = 403;
+    throw err;
+  }
+  if (!conv.members.some((m) => m.toString() === targetUserId)) {
+    const err = new Error("User is not a member");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  conv.members = conv.members.filter((m) => m.toString() !== targetUserId);
+  conv.admins = conv.admins.filter((a) => a.toString() !== targetUserId);
+
+  if (conv.members.length < 2) {
+    await Message.deleteMany({ conversation: conv._id });
+    await ConversationHide.deleteMany({ conversation: conv._id });
+    await conv.deleteOne();
+    return { removed: true, deleted: true };
+  }
+
+  await conv.save();
+  return { removed: true, deleted: false };
+}
+
+export async function addMembersToGroup(
+  conversationId: string,
+  actorId: string,
+  userIds: string[]
+) {
+  if (!mongoose.isValidObjectId(conversationId)) {
+    const err = new Error("Invalid conversation id");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  const validIds = userIds.filter((id) => mongoose.isValidObjectId(id));
+  if (!validIds.length) {
+    const err = new Error("No valid user ids provided");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  const conv = await Conversation.findById(conversationId);
+  if (!conv) {
+    const err = new Error("Conversation not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  if (conv.kind !== "group") {
+    const err = new Error("Not a group conversation");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (!conv.admins.some((a) => a.toString() === actorId)) {
+    const err = new Error("Only admins can add members");
+    (err as Error & { statusCode?: number }).statusCode = 403;
+    throw err;
+  }
+
+  const existing = new Set(conv.members.map((m) => m.toString()));
+  const newIds = validIds.filter((id) => !existing.has(id));
+
+  if (!newIds.length) {
+    return { added: false, conversationId };
+  }
+
+  const newMembers = newIds.map((id) => new mongoose.Types.ObjectId(id));
+  conv.members.push(...newMembers);
+  await conv.save();
+
+  return { added: true, conversationId };
+}
+
 function mapMessageRow(
   m: {
     _id: mongoose.Types.ObjectId;

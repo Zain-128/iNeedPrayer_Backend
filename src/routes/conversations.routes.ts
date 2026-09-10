@@ -10,6 +10,8 @@ router.post("/group", protect, chatController.createGroup);
 router.get("/:id/messages", protect, chatController.listMessages);
 router.post("/:id/messages", protect, chatController.sendMessage);
 router.post("/:id/leave", protect, chatController.leaveGroup);
+router.delete("/:id/members/:userId", protect, chatController.removeMember);
+router.post("/:id/members", protect, chatController.addMembers);
 router.delete("/:id/me", protect, chatController.hideConversation);
 
 export default router;

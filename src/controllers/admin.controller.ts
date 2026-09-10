@@ -11,6 +11,9 @@ import * as adminNotifications from "../services/admin/adminNotifications.servic
 import * as adminMonetization from "../services/admin/adminMonetization.service.js";
 import * as adminEmailCampaigns from "../services/admin/adminEmailCampaigns.service.js";
 import * as adminAnnouncements from "../services/admin/adminAnnouncements.service.js";
+import * as adminEvents from "../services/admin/adminEvents.service.js";
+import * as adminPush from "../services/admin/adminPush.service.js";
+import * as adminSettings from "../services/admin/adminSettings.service.js";
 import { paramStr } from "../utils/routeParams.js";
 
 function handle(res: Response, err: unknown) {
@@ -979,6 +982,178 @@ export const archiveAnnouncement = async (req: AuthRequest, res: Response) => {
   try {
     return res.json(
       await adminAnnouncements.archiveAnnouncement(paramStr(req.params.id))
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+// ── Events ──────────────────────────────────────────────
+
+export const listEvents = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(await adminEvents.listEvents(q(req)));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const getEvent = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminEvents.getEvent(paramStr(req.params.id))
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const createEvent = async (req: AuthRequest, res: Response) => {
+  try {
+    return res
+      .status(201)
+      .json(await adminEvents.createEvent(req.body));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const updateEvent = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminEvents.updateEvent(paramStr(req.params.id), req.body)
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const deleteEvent = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminEvents.deleteEvent(paramStr(req.params.id))
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const cancelEvent = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminEvents.cancelEvent(paramStr(req.params.id))
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+// ── Push Notifications ──────────────────────────────────
+
+export const listPushNotifications = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(await adminPush.listPushNotifications(q(req)));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const getPushNotification = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminPush.getPushNotification(paramStr(req.params.id))
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const createPushNotification = async (req: AuthRequest, res: Response) => {
+  try {
+    return res
+      .status(201)
+      .json(await adminPush.createPushNotification(req.body));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const updatePushNotification = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminPush.updatePushNotification(paramStr(req.params.id), req.body)
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const deletePushNotification = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminPush.deletePushNotification(paramStr(req.params.id))
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const sendPushNotification = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminPush.sendPushNotification(paramStr(req.params.id))
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+// ── Settings ────────────────────────────────────────────
+
+export const getSettings = async (req: AuthRequest, res: Response) => {
+  try {
+    const category = typeof req.query.category === "string"
+      ? req.query.category
+      : undefined;
+    return res.json(await adminSettings.getSettings(category));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const getNotificationSettings = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(await adminSettings.getNotificationSettings());
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const updateNotificationSettings = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminSettings.updateNotificationSettings(
+        req.body,
+        (req as AuthRequest).userId
+      )
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const updateSettings = async (req: AuthRequest, res: Response) => {
+  try {
+    const category = typeof req.body?.category === "string"
+      ? req.body.category
+      : "general";
+    const { category: _c, ...updates } = req.body ?? {};
+    return res.json(
+      await adminSettings.updateSettings(
+        updates,
+        category,
+        (req as AuthRequest).userId
+      )
     );
   } catch (err) {
     return handle(res, err);

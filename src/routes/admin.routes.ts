@@ -136,4 +136,26 @@ router.delete("/announcements/:id", admin.deleteAnnouncement);
 router.post("/announcements/:id/publish", admin.publishAnnouncement);
 router.post("/announcements/:id/archive", admin.archiveAnnouncement);
 
+// Events
+router.get("/events", admin.listEvents);
+router.post("/events", admin.createEvent);
+router.get("/events/:id", admin.getEvent);
+router.patch("/events/:id", admin.updateEvent);
+router.delete("/events/:id", admin.deleteEvent);
+router.post("/events/:id/cancel", admin.cancelEvent);
+
+// Push Notifications
+router.get("/push-notifications", admin.listPushNotifications);
+router.post("/push-notifications", admin.createPushNotification);
+router.get("/push-notifications/:id", admin.getPushNotification);
+router.patch("/push-notifications/:id", admin.updatePushNotification);
+router.delete("/push-notifications/:id", admin.deletePushNotification);
+router.post("/push-notifications/:id/send", admin.sendPushNotification);
+
+// Settings
+router.get("/settings", admin.getSettings);
+router.patch("/settings", admin.updateSettings);
+router.get("/settings/notifications", admin.getNotificationSettings);
+router.patch("/settings/notifications", admin.updateNotificationSettings);
+
 export default router;

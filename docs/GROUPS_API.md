@@ -78,10 +78,12 @@ Authorization: Bearer <token>
 ```json
 {
   "users": [
-    { "id": "665b...", "name": "John Smith", "avatar": "https://...", "email": "john@example.com" }
+    { "id": "665b...", "name": "John Smith", "avatar": "https://...", "email": "john@example.com", "friendCount": 12 }
   ]
 }
 ```
+
+Each user now includes `friendCount` — the number of accepted friends that user has. Display as a badge (e.g. "12 friends") to help the inviter pick people.
 
 ### 3) `InviteMembersScreen` — Done
 

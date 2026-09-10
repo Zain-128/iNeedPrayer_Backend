@@ -22,8 +22,8 @@ async function assertNotBlocked(a: string, b: string) {
 }
 
 async function assertUserExists(userId: string) {
-  const u = await User.findById(userId).select("status role").lean();
-  if (!u || u.status === "blocked" || u.role === "admin") {
+  const u = await User.findById(userId).select("status role deletedAt").lean();
+  if (!u || u.deletedAt || u.status === "blocked" || u.role === "admin") {
     throw httpError("User not found", 404);
   }
 }
@@ -153,8 +153,8 @@ export async function listFriends(userId: string) {
     status: "accepted",
     $or: [{ from: userId }, { to: userId }],
   })
-    .populate("from", "name avatar city state country")
-    .populate("to", "name avatar city state country")
+    .populate("from", "name avatar city state country deletedAt")
+    .populate("to", "name avatar city state country deletedAt")
     .lean();
 
   const blocked = await UserBlock.find({
@@ -167,6 +167,11 @@ export async function listFriends(userId: string) {
   }
 
   const friends = rows
+    .filter((r) => {
+      const from = r.from as unknown as { deletedAt?: Date | null };
+      const to = r.to as unknown as { deletedAt?: Date | null };
+      return !from.deletedAt && !to.deletedAt;
+    })
     .map((r) => {
       const peer =
         r.from._id.toString() === userId
@@ -202,7 +207,7 @@ function mapRequestUser(row: {
 
 export async function listIncomingFriendRequests(userId: string) {
   const rows = await FriendRequest.find({ to: userId, status: "pending" })
-    .populate("from", "name avatar city state country")
+    .populate("from", "name avatar city state country deletedAt")
     .sort({ createdAt: -1 })
     .lean();
 
@@ -216,13 +221,16 @@ export async function listIncomingFriendRequests(userId: string) {
   }
 
   return rows
-    .filter((r) => !blocked.has(r.from._id.toString()))
+    .filter((r) => {
+      const from = r.from as unknown as { deletedAt?: Date | null };
+      return !from.deletedAt && !blocked.has(r.from._id.toString());
+    })
     .map((r) => mapRequestUser(r as never, "from"));
 }
 
 export async function listOutgoingFriendRequests(userId: string) {
   const rows = await FriendRequest.find({ from: userId, status: "pending" })
-    .populate("to", "name avatar city state country")
+    .populate("to", "name avatar city state country deletedAt")
     .sort({ createdAt: -1 })
     .lean();
 
@@ -236,7 +244,10 @@ export async function listOutgoingFriendRequests(userId: string) {
   }
 
   return rows
-    .filter((r) => !blocked.has(r.to._id.toString()))
+    .filter((r) => {
+      const to = r.to as unknown as { deletedAt?: Date | null };
+      return !to.deletedAt && !blocked.has(r.to._id.toString());
+    })
     .map((r) => mapRequestUser(r as never, "to"));
 }
 

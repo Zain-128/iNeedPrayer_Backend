@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 export type AdminActivityType =
   | "user_registered"
+  | "user_deleted"
   | "post_created"
   | "prayer_created"
   | "praise_created"

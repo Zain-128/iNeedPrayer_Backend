@@ -108,3 +108,17 @@ export const socialLogin = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const deleteAccount = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ message: "Not authorized" });
+    }
+    const result = await authService.deleteAccount(req.userId);
+    return res.status(200).json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    const status = e.statusCode ?? 500;
+    return res.status(status).json({ message: e.message ?? "Failed to delete account" });
+  }
+};

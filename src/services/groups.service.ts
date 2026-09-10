@@ -5,6 +5,7 @@ import { GroupInvite } from "../models/groupInvite.model.js";
 import { GroupJoinRequest } from "../models/groupJoinRequest.model.js";
 import { GroupMute } from "../models/groupMute.model.js";
 import { User } from "../models/user.model.js";
+import { FriendRequest } from "../models/friendRequest.model.js";
 import * as postsService from "./posts.service.js";
 import { createNotification, notifyMany } from "./notifications.service.js";
 import { formatCountLabel } from "../utils/mappers.js";
@@ -539,9 +540,10 @@ export async function listInviteCandidates(
     .filter((id) => mongoose.isValidObjectId(id))
     .map((id) => new mongoose.Types.ObjectId(id));
 
-  const userFilter = rx
+  const userFilter: Record<string, unknown> = rx
     ? { $or: [{ name: rx }, { email: rx }], _id: { $nin: excludeIds } }
     : { _id: { $nin: excludeIds } };
+  userFilter.deletedAt = null;
 
   const users = await User.find(userFilter)
     .select("name email avatar")
@@ -549,11 +551,57 @@ export async function listInviteCandidates(
     .limit(50)
     .lean();
 
+  if (!users.length) return [];
+
+  const userIds = users.map((u) => u._id);
+
+  const friendCounts = await FriendRequest.aggregate([
+    {
+      $match: {
+        status: "accepted",
+        $or: [
+          { from: { $in: userIds } },
+          { to: { $in: userIds } },
+        ],
+      },
+    },
+    {
+      $project: {
+        userA: "$from",
+        userB: "$to",
+      },
+    },
+    {
+      $facet: {
+        fromCounts: [
+          { $group: { _id: "$userA", count: { $sum: 1 } } },
+        ],
+        toCounts: [
+          { $group: { _id: "$userB", count: { $sum: 1 } } },
+        ],
+      },
+    },
+  ]);
+
+  const countMap = new Map<string, number>();
+  const facet = friendCounts[0];
+  if (facet) {
+    for (const row of facet.fromCounts) {
+      const id = row._id.toString();
+      countMap.set(id, (countMap.get(id) ?? 0) + row.count);
+    }
+    for (const row of facet.toCounts) {
+      const id = row._id.toString();
+      countMap.set(id, (countMap.get(id) ?? 0) + row.count);
+    }
+  }
+
   return users.map((u) => ({
     id: u._id.toString(),
     name: u.name,
     avatar: u.avatar ?? "",
     email: u.email,
+    friendCount: countMap.get(u._id.toString()) ?? 0,
   }));
 }
 
