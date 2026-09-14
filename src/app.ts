@@ -19,8 +19,10 @@ import profileRoutes from "./routes/profile.routes.js";
 import liveStreamRoutes from "./routes/liveStream.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import { dbConnect } from "./configs/db.connect.js";
-import { ALLOWED_ORIGINS, UPLOAD_ROOT } from "./contants.js";
+import { ALLOWED_ORIGINS, UPLOAD_ROOT, STRIPE_WEBHOOK_SECRET } from "./contants.js";
 import { ensureUploadDir } from "./utils/ensureUploadDir.js";
+import * as stripeService from "./services/stripe.service.js";
+import type Stripe from "stripe";
 
 const app = express();
 
@@ -43,13 +45,48 @@ app.use((req, res, next) => {
   );
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Authorization"
+    "Content-Type, Authorization, Stripe-Signature"
   );
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
   }
   next();
 });
+
+/* ─── Stripe Webhook (raw body required — must be before express.json()) ─── */
+if (STRIPE_WEBHOOK_SECRET) {
+  app.post(
+    "/api/webhook/stripe",
+    express.raw({ type: "application/json" }),
+    async (req, res) => {
+      try {
+        const sig = req.headers["stripe-signature"] as string;
+        const event = stripeService.constructWebhookEvent(
+          req.body as Buffer,
+          sig
+        );
+
+        switch (event.type) {
+          case "checkout.session.completed":
+            await stripeService.handleCheckoutCompleted(
+              event.data.object as Stripe.Checkout.Session
+            );
+            break;
+          case "customer.subscription.deleted":
+            await stripeService.handleSubscriptionDeleted(
+              event.data.object as Stripe.Subscription
+            );
+            break;
+        }
+
+        res.json({ received: true });
+      } catch (err: any) {
+        console.error("Stripe webhook error:", err.message);
+        res.status(400).json({ error: `Webhook Error: ${err.message}` });
+      }
+    }
+  );
+}
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

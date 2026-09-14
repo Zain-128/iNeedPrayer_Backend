@@ -104,3 +104,17 @@ export const LIVE_HOST_HEARTBEAT_TIMEOUT_MS = Math.max(
   30_000,
   parseInt(process.env.LIVE_HOST_HEARTBEAT_TIMEOUT_MS ?? "90000", 10) || 90_000
 );
+
+/** Stripe */
+export const STRIPE_SECRET_KEY = (process.env.STRIPE_SECRET_KEY ?? "").trim();
+export const STRIPE_WEBHOOK_SECRET = (process.env.STRIPE_WEBHOOK_SECRET ?? "").trim();
+export const STRIPE_PRICE_MONTHLY = (process.env.STRIPE_PRICE_MONTHLY ?? "").trim();
+export const STRIPE_PRICE_YEARLY = (process.env.STRIPE_PRICE_YEARLY ?? "").trim();
+
+/** Coins pricing (USD cents) */
+export const COINS_PACKAGES = [
+  { coins: 100, priceCents: 99, label: "100 Coins" },
+  { coins: 500, priceCents: 399, label: "500 Coins" },
+  { coins: 1000, priceCents: 699, label: "1000 Coins" },
+  { coins: 5000, priceCents: 2999, label: "5000 Coins" },
+];

@@ -1,6 +1,7 @@
 import { User } from "../models/user.model.js";
+import { UserSubscription } from "../models/userSubscription.model.js";
+import * as stripeService from "./stripe.service.js";
 
-/** Placeholder until billing is integrated (no live stream). */
 export async function getSubscriptionStatus(userId: string) {
   const u = await User.findById(userId).lean();
   if (!u) {
@@ -8,10 +9,29 @@ export async function getSubscriptionStatus(userId: string) {
     (err as Error & { statusCode?: number }).statusCode = 404;
     throw err;
   }
+
+  const activeSub = await stripeService.getUserSubscription(userId);
+
+  if (activeSub) {
+    const plan = activeSub.plan as any;
+    return {
+      active: true,
+      plan: plan?.name || activeSub.planName,
+      planId: plan?._id?.toString() || null,
+      billingCycle: activeSub.billing,
+      expiryDate: activeSub.expiryDate,
+      autoRenew: activeSub.autoRenew,
+      startDate: activeSub.startDate,
+    };
+  }
+
   return {
     active: false,
     plan: "none",
-    message: "Community subscription is not activated for this account.",
+    planId: null,
+    billingCycle: null,
+    expiryDate: null,
+    autoRenew: false,
   };
 }
 
