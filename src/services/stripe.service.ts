@@ -252,6 +252,19 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session) 
       { upsert: true }
     );
 
+    const { WalletLedger } = await import("../models/walletLedger.model.js");
+    await WalletLedger.create({
+      kind: "purchase",
+      toOwnerType: "user",
+      toOwnerId: metadata.userId,
+      coins,
+      feeCoins: 0,
+      netCoins: coins,
+      message: metadata.packageLabel || `${coins} coins purchased`,
+      actorUserId: metadata.userId,
+      metadata: { purchaseId: metadata.purchaseId },
+    });
+
     // Record transaction
     const user = await User.findById(metadata.userId).lean();
     await PlatformTransaction.create({
@@ -294,13 +307,86 @@ export async function getUserCoins(userId: string) {
   return { balance: coins?.balance ?? 0, totalPurchased: coins?.totalPurchased ?? 0 };
 }
 
+export async function createCustomCoinsCheckout(userId: string, coinsRaw: number) {
+  const { priceCustomCoins } = await import("./wallet.service.js");
+  const pkg = priceCustomCoins(Math.floor(coinsRaw));
+
+  const user = await User.findById(userId);
+  if (!user) {
+    const err = new Error("User not found");
+    (err as any).statusCode = 404;
+    throw err;
+  }
+
+  const stripe = getStripe();
+  const baseUrl = PUBLIC_BASE_URL || "http://localhost:3004";
+
+  let customerId = (user as any).stripeCustomerId;
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      email: user.email,
+      name: user.name,
+      metadata: { userId: user._id.toString() },
+    });
+    customerId = customer.id;
+    await User.findByIdAndUpdate(userId, { stripeCustomerId: customerId });
+  }
+
+  const purchase = await CoinPurchase.create({
+    user: userId,
+    coins: pkg.coins,
+    amountCents: pkg.priceCents,
+    packageLabel: pkg.label,
+    status: "Pending",
+  });
+
+  const session = await stripe.checkout.sessions.create({
+    customer: customerId,
+    mode: "payment",
+    payment_method_types: ["card"],
+    line_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: pkg.label,
+            description: `Purchase ${pkg.coins} coins`,
+          },
+          unit_amount: pkg.priceCents,
+        },
+        quantity: 1,
+      },
+    ],
+    success_url: `${baseUrl}/coins/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${baseUrl}/coins/cancel`,
+    metadata: {
+      userId: userId,
+      coins: pkg.coins.toString(),
+      purchaseId: purchase._id.toString(),
+      packageLabel: pkg.label,
+    },
+  });
+
+  await CoinPurchase.findByIdAndUpdate(purchase._id, {
+    stripeSessionId: session.id,
+  });
+
+  return { sessionId: session.id, url: session.url };
+}
+
 export async function getCoinsPackages() {
   return COINS_PACKAGES.map((p, i) => ({
     index: i,
+    name: (p as any).name ?? p.label,
     coins: p.coins,
     priceCents: p.priceCents,
     label: p.label,
+    tag: (p as { tag?: string }).tag ?? "",
+    positioning: (p as any).positioning ?? "",
+    bonusText: (p as any).bonusText ?? "",
     priceDisplay: `$${(p.priceCents / 100).toFixed(2)}`,
+    appStoreProductId: p.appStoreProductId,
+    googlePlayProductId: p.googlePlayProductId,
   }));
 }
 

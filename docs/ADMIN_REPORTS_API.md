@@ -2,6 +2,8 @@
 
 Review and resolve user reports from the admin dashboard.
 
+**Status:** Ready (Mongo-backed).
+
 **Base path:** `/api/admin`  
 **Auth:** `Authorization: Bearer <admin-token>` (all endpoints below)
 

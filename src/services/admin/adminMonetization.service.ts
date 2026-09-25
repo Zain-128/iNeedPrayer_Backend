@@ -175,6 +175,25 @@ export async function deleteSubscriptionPlan(id: string) {
   return { message: "Deleted", id };
 }
 
+export async function getSubscriptionPlan(id: string) {
+  if (!mongoose.isValidObjectId(id)) throw httpError("Invalid id", 400);
+  const p = await SubscriptionPlan.findById(id).lean();
+  if (!p) throw httpError("Plan not found", 404);
+  return {
+    id: p._id.toString(),
+    name: p.name,
+    description: p.description ?? "",
+    price: p.priceCents / 100,
+    priceFormatted: formatMoney(p.priceCents),
+    billingCycle: p.billingCycle,
+    features: p.features ?? [],
+    isActive: p.isActive,
+    trialPeriod: p.trialPeriodDays ?? 0,
+    subscribers: p.subscribersCount ?? 0,
+    createdAt: formatDisplayDate(p.createdAt),
+  };
+}
+
 // ── Subscriptions ────────────────────────────────────
 
 function mapSubscription(
@@ -812,6 +831,9 @@ export async function approveWithdrawal(id: string, adminUserId?: string) {
   }
   await w.save();
 
+  const { settleWithdrawalInWallet } = await import("../wallet.service.js");
+  await settleWithdrawalInWallet(id, "approve");
+
   await PlatformTransaction.create({
     user: w.user,
     userName: w.name,
@@ -849,6 +871,10 @@ export async function rejectWithdrawal(
     w.processedBy = new mongoose.Types.ObjectId(adminUserId);
   }
   await w.save();
+
+  const { settleWithdrawalInWallet } = await import("../wallet.service.js");
+  await settleWithdrawalInWallet(id, "reject");
+
   return mapWithdrawal(w);
 }
 

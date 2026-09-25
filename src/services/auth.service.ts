@@ -103,6 +103,9 @@ export const register = async (input: RegisterInput): Promise<AuthResult> => {
   });
   const token = signAccessToken(user._id.toString());
 
+  const { ensureUserWallet } = await import("./wallet.service.js");
+  void ensureUserWallet(user._id.toString());
+
   const { recordAdminActivity } = await import(
     "./admin/adminActivity.service.js"
   );
@@ -164,9 +167,11 @@ export const socialLogin = async (
   const email = input.email?.toLowerCase().trim();
   const name = input.name?.trim();
   const socialLoginId = String(input.socialLoginId ?? "").trim();
-  const provider = String(input.socialLoginProvider ?? "")
-    .toLowerCase()
-    .trim();
+  let provider = String(input.socialLoginProvider ?? "").toLowerCase().trim();
+
+  if (provider === "x") {
+    provider = "twitter";
+  }
 
   if (!email || !name || !socialLoginId || !provider) {
     const err = new Error(
@@ -176,9 +181,17 @@ export const socialLogin = async (
     throw err;
   }
 
-  if (!SOCIAL_PROVIDERS.includes(provider as (typeof SOCIAL_PROVIDERS)[number])) {
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!EMAIL_REGEX.test(email)) {
+    const err = new Error("Please provide a valid email address");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  const allowedProviders = ["google", "apple", "facebook", "twitter"];
+  if (!allowedProviders.includes(provider)) {
     const err = new Error(
-      `socialLoginProvider must be one of: ${SOCIAL_PROVIDERS.join(", ")}`
+      `socialLoginProvider must be one of: ${SOCIAL_PROVIDERS.join(", ")}, x`
     );
     (err as Error & { statusCode?: number }).statusCode = 400;
     throw err;
@@ -189,43 +202,64 @@ export const socialLogin = async (
     socialLoginId,
   });
 
-  if (user && user.email !== email) {
-    const err = new Error("Email does not match this social account");
-    (err as Error & { statusCode?: number }).statusCode = 400;
-    throw err;
-  }
-
-  if (!user) {
-    const emailTaken = await User.findOne({ email });
-    if (emailTaken) {
-      const err = new Error(
-        "An account with this email already exists. Sign in with password or use the same social provider."
-      );
-      (err as Error & { statusCode?: number }).statusCode = 409;
-      throw err;
+  if (user) {
+    let modified = false;
+    if (user.email !== email) {
+      const emailOwner = await User.findOne({ email });
+      if (emailOwner && emailOwner._id.toString() !== user._id.toString()) {
+        const err = new Error("Email is already associated with another account");
+        (err as Error & { statusCode?: number }).statusCode = 400;
+        throw err;
+      }
+      user.email = email;
+      modified = true;
     }
+    if (input.profilePicture?.trim() && !user.avatar) {
+      user.avatar = input.profilePicture.trim();
+      modified = true;
+    }
+    if (modified) {
+      await user.save();
+    }
+  } else {
+    // Check if account already exists with this email
+    user = await User.findOne({ email });
 
-    user = await User.create({
-      email,
-      password: randomPassword(),
-      name,
-      avatar: input.profilePicture?.trim() || "",
-      socialLoginProvider: provider,
-      socialLoginId,
-    });
+    if (user) {
+      // Securely link existing account to this social provider identity
+      user.socialLoginProvider = provider;
+      user.socialLoginId = socialLoginId;
+      if (input.profilePicture?.trim() && !user.avatar) {
+        user.avatar = input.profilePicture.trim();
+      }
+      await user.save();
+    } else {
+      // Create new user
+      user = await User.create({
+        email,
+        password: randomPassword(),
+        name,
+        avatar: input.profilePicture?.trim() || "",
+        socialLoginProvider: provider,
+        socialLoginId,
+      });
 
-    const { recordAdminActivity } = await import(
-      "./admin/adminActivity.service.js"
-    );
-    void recordAdminActivity({
-      type: "user_registered",
-      title: "New user registered",
-      message: `${user.name} joined via ${provider}`,
-      refType: "user",
-      refId: user._id.toString(),
-      actorId: user._id.toString(),
-      meta: { provider },
-    });
+      const { ensureUserWallet } = await import("./wallet.service.js");
+      void ensureUserWallet(user._id.toString());
+
+      const { recordAdminActivity } = await import(
+        "./admin/adminActivity.service.js"
+      );
+      void recordAdminActivity({
+        type: "user_registered",
+        title: "New user registered",
+        message: `${user.name} joined via ${provider}`,
+        refType: "user",
+        refId: user._id.toString(),
+        actorId: user._id.toString(),
+        meta: { provider },
+      });
+    }
   }
 
   assertNotBlocked(user);

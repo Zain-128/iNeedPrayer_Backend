@@ -3,59 +3,28 @@
 **Base path:** `/api/admin`  
 **Auth:** `Authorization: Bearer <admin-token>`
 
-Covers subscriptions, plans, donations, wallet, withdrawals, and transactions.
+Covers donations, wallet, withdrawals, and transactions.
+
+**Subscriptions (plans + subscribers):** see dedicated doc → [ADMIN_SUBSCRIPTIONS_API.md](./ADMIN_SUBSCRIPTIONS_API.md)
 
 ---
 
-## Subscriptions
+## Subscriptions (quick reference)
+
+Full docs: [ADMIN_SUBSCRIPTIONS_API.md](./ADMIN_SUBSCRIPTIONS_API.md)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/subscriptions` | List subscriptions |
-| POST | `/subscriptions` | Create subscription |
-| GET | `/subscriptions/:id` | Get subscription |
-| PATCH | `/subscriptions/:id` | Update subscription |
-| DELETE | `/subscriptions/:id` | Delete subscription |
-
-**Query:** `page`, `limit`, `search`, `status`, `plan`, `paymentStatus`
-
-**Create body:**
-```json
-{
-  "userId": "665f...",
-  "planId": "665f...",
-  "plan": "Monthly",
-  "amount": "9.99",
-  "billing": "Monthly",
-  "paymentStatus": "Paid",
-  "status": "Active",
-  "autoRenew": true
-}
-```
-
----
-
-## Subscription plans
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
+| GET | `/subscriptions` | List subscribers |
+| POST | `/subscriptions` | Create / grant subscription |
+| GET | `/subscriptions/:id` | Get subscriber |
+| PATCH | `/subscriptions/:id` | Update |
+| DELETE | `/subscriptions/:id` | Delete |
 | GET | `/subscription-plans` | List plans |
+| GET | `/subscription-plans/:id` | Get plan |
 | POST | `/subscription-plans` | Create plan |
 | PATCH | `/subscription-plans/:id` | Update plan |
 | DELETE | `/subscription-plans/:id` | Delete plan |
-
-**Create body:**
-```json
-{
-  "name": "Premium Monthly",
-  "description": "Full access",
-  "price": "9.99",
-  "billingCycle": "Monthly",
-  "features": ["Live streams", "Groups"],
-  "isActive": true,
-  "trialPeriod": 7
-}
-```
 
 ---
 
@@ -119,3 +88,11 @@ Types: `Subscription`, `Donation`, `Coins Purchase`, `Withdrawal`, `Refund`, `Re
   "stats": {}
 }
 ```
+
+---
+
+## Related (app wallets)
+
+User-facing coin wallets, donations, super chats, and entity withdrawals live under **`/api/wallet`**. See [WALLET_API.md](./WALLET_API.md).
+
+**Stripe vs IAP:** Coin packages / community subscriptions sold *inside* iOS/Android apps should use **In-App Purchases** for store compliance. Current mobile flow opens **Stripe Checkout** in the browser (fine for web + MVP). Withdrawals use admin approval (+ Stripe Connect later for payouts).

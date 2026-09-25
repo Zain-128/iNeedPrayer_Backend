@@ -220,9 +220,9 @@ Create account.
 |-------|------|----------|
 | `email` | string | Yes |
 | `name` | string | Yes |
-| `socialLoginProvider` | string | Yes — `google` \| `facebook` \| `apple` \| `twitter` |
+| `socialLoginProvider` | string | Yes — `google` \| `facebook` \| `apple` \| `twitter` \| `x` |
 | `socialLoginId` | string | Yes — Firebase/provider UID |
-| `profilePicture` | string | No — saved as `avatar` on new users |
+| `profilePicture` | string | No — saved as `avatar` if avatar is empty |
 
 **Success `200`**
 

@@ -164,15 +164,15 @@ Links or creates an account using a provider id + email from your mobile SDK (Go
 |-------|------|----------|--------|
 | `email` | string | Yes | Normalised to lowercase |
 | `name` | string | Yes | Display name |
-| `socialLoginProvider` | string | Yes | One of: `google`, `apple`, `facebook`, `twitter` |
+| `socialLoginProvider` | string | Yes | One of: `google`, `apple`, `facebook`, `twitter`, `x` |
 | `socialLoginId` | string | Yes | Stable id from the provider (subject / user id) |
-| `profilePicture` | string | No | URL string; stored as `avatar` on **new** users only |
+| `profilePicture` | string | No | URL string; stored as `avatar` if avatar is empty |
 
 **Behaviour**
 
-- **Existing user** (same `socialLoginProvider` + `socialLoginId`): logs in; `email` must match the stored email.
+- **Existing social user** (same `socialLoginProvider` + `socialLoginId`): logs in and returns access/refresh tokens.
+- **Existing email user**: if `email` exists under another sign-in method, links `socialLoginProvider` and `socialLoginId` to the account and logs in.
 - **New user**: if `email` is not already registered, creates account with a random internal password and optional `avatar`.
-- **Conflict**: if `email` is already taken by another account type, returns `409` (use password login or the same social provider).
 
 **Success** `200 OK`
 
@@ -199,9 +199,8 @@ Links or creates an account using a provider id + email from your mobile SDK (Go
 | Status | Typical message |
 |--------|-----------------|
 | 400 | Please provide email, name, socialLoginProvider, and socialLoginId |
-| 400 | socialLoginProvider must be one of: google, apple, facebook, twitter |
-| 400 | Email does not match this social account |
-| 409 | An account with this email already exists. Sign in with password or use the same social provider. |
+| 400 | Please provide a valid email address |
+| 400 | socialLoginProvider must be one of: google, apple, facebook, twitter, x |
 | 500 | Social login failed |
 
 ---

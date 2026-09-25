@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 export type DonationStatus = "Completed" | "Pending" | "Failed" | "Refunded";
 export type DonationType = "One-Time" | "Monthly";
-export type DonationRecipientType = "App" | "Church" | "Prayer Campaign";
+export type DonationRecipientType = "App" | "Church" | "Group" | "Prayer Campaign";
 
 const donationSchema = new mongoose.Schema(
   {
@@ -22,7 +22,7 @@ const donationSchema = new mongoose.Schema(
     },
     donatedTo: {
       type: String,
-      enum: ["App", "Church", "Prayer Campaign"],
+      enum: ["App", "Church", "Group", "Prayer Campaign"],
       default: "App",
       index: true,
     },

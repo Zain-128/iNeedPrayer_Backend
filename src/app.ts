@@ -18,6 +18,7 @@ import socialRoutes from "./routes/social.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
 import liveStreamRoutes from "./routes/liveStream.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import walletRoutes from "./routes/wallet.routes.js";
 import { dbConnect } from "./configs/db.connect.js";
 import { ALLOWED_ORIGINS, UPLOAD_ROOT, STRIPE_WEBHOOK_SECRET } from "./contants.js";
 import { ensureUploadDir } from "./utils/ensureUploadDir.js";
@@ -55,37 +56,38 @@ app.use((req, res, next) => {
 
 /* ─── Stripe Webhook (raw body required — must be before express.json()) ─── */
 if (STRIPE_WEBHOOK_SECRET) {
-  app.post(
-    "/api/webhook/stripe",
-    express.raw({ type: "application/json" }),
-    async (req, res) => {
-      try {
-        const sig = req.headers["stripe-signature"] as string;
-        const event = stripeService.constructWebhookEvent(
-          req.body as Buffer,
-          sig
-        );
+  const stripeWebhookHandler = async (req: express.Request, res: express.Response) => {
+    try {
+      const sig = req.headers["stripe-signature"] as string;
+      const event = stripeService.constructWebhookEvent(
+        req.body as Buffer,
+        sig
+      );
 
-        switch (event.type) {
-          case "checkout.session.completed":
-            await stripeService.handleCheckoutCompleted(
-              event.data.object as Stripe.Checkout.Session
-            );
-            break;
-          case "customer.subscription.deleted":
-            await stripeService.handleSubscriptionDeleted(
-              event.data.object as Stripe.Subscription
-            );
-            break;
-        }
-
-        res.json({ received: true });
-      } catch (err: any) {
-        console.error("Stripe webhook error:", err.message);
-        res.status(400).json({ error: `Webhook Error: ${err.message}` });
+      switch (event.type) {
+        case "checkout.session.completed":
+          await stripeService.handleCheckoutCompleted(
+            event.data.object as Stripe.Checkout.Session
+          );
+          break;
+        case "customer.subscription.deleted":
+          await stripeService.handleSubscriptionDeleted(
+            event.data.object as Stripe.Subscription
+          );
+          break;
       }
+
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error("Stripe webhook error:", err.message);
+      res.status(400).json({ error: `Webhook Error: ${err.message}` });
     }
-  );
+  };
+
+  const rawJsonParser = express.raw({ type: "application/json" });
+  app.post("/api/webhook/stripe", rawJsonParser, stripeWebhookHandler);
+  app.post("/api/stripe/webhook", rawJsonParser, stripeWebhookHandler);
+  app.post("/api/webhooks/stripe", rawJsonParser, stripeWebhookHandler);
 }
 
 app.use(express.json());
@@ -127,11 +129,13 @@ app.use("/api/conversations", conversationsRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/payment-methods", paymentRoutes);
 app.use("/api/subscription", subscriptionRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/friends", friendsRoutes);
 app.use("/api/block", blockRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/live", liveStreamRoutes);
+app.use("/api/wallet", walletRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api", socialRoutes);
 

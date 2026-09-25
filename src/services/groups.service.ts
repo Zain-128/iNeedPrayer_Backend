@@ -243,6 +243,9 @@ export async function createGroup(
 
   await GroupMember.create({ user: userId, group: g._id, role: "owner" });
 
+  const { ensureEntityWallet } = await import("./wallet.service.js");
+  void ensureEntityWallet("group", g._id.toString());
+
   const { recordAdminActivity } = await import(
     "./admin/adminActivity.service.js"
   );

@@ -3,6 +3,20 @@ import { AuthRequest } from "../middleware/auth.middleware.js";
 import * as subscriptionService from "../services/subscription.service.js";
 import * as stripeService from "../services/stripe.service.js";
 
+export const getPlans = async (_req: AuthRequest, res: Response) => {
+  try {
+    const plans = await subscriptionService.getActiveSubscriptionPlans();
+    return res.json({
+      success: true,
+      plans,
+      data: plans,
+    });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
 export const getStatus = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
@@ -64,11 +78,25 @@ export const getCoinsBalance = async (req: AuthRequest, res: Response) => {
 export const purchaseCoins = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
-    const { packageIndex } = req.body ?? {};
-    if (packageIndex === undefined || packageIndex === null) {
-      return res.status(400).json({ message: "packageIndex is required (0-3)" });
+    const { packageIndex, customCoins } = req.body ?? {};
+
+    if (customCoins !== undefined && customCoins !== null) {
+      const checkout = await stripeService.createCustomCoinsCheckout(
+        req.userId,
+        Number(customCoins)
+      );
+      return res.json(checkout);
     }
-    const checkout = await stripeService.createCoinsCheckout(req.userId, packageIndex);
+
+    if (packageIndex === undefined || packageIndex === null) {
+      return res
+        .status(400)
+        .json({ message: "packageIndex or customCoins is required" });
+    }
+    const checkout = await stripeService.createCoinsCheckout(
+      req.userId,
+      Number(packageIndex)
+    );
     return res.json(checkout);
   } catch (err) {
     const e = err as Error & { statusCode?: number };

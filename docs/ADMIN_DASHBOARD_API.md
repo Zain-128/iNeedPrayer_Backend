@@ -50,21 +50,21 @@ Content-Type: application/json
 | Notifications | `/notifications` | [ADMIN_NOTIFICATIONS_API.md](./ADMIN_NOTIFICATIONS_API.md) |
 | Top-bar activity | header bell | [ADMIN_NOTIFICATIONS_API.md](./ADMIN_NOTIFICATIONS_API.md#1-top-bar-activity-notifications) |
 | Analytics | `/analytics` | [ADMIN_ANALYTICS_API.md](./ADMIN_ANALYTICS_API.md) |
-| Subscriptions | `/subscriptions` | [ADMIN_MONETIZATION_API.md](./ADMIN_MONETIZATION_API.md#subscriptions) |
+| **Subscriptions (plans + subscribers)** | `/subscriptions` | [ADMIN_SUBSCRIPTIONS_API.md](./ADMIN_SUBSCRIPTIONS_API.md) |
 | Donations | `/donations` | [ADMIN_MONETIZATION_API.md](./ADMIN_MONETIZATION_API.md#donations) |
 | Wallet | `/wallet` | [ADMIN_MONETIZATION_API.md](./ADMIN_MONETIZATION_API.md#wallet) |
 | Withdrawals | `/withdrawals` | [ADMIN_MONETIZATION_API.md](./ADMIN_MONETIZATION_API.md#withdrawals) |
 | Transactions | `/transactions` | [ADMIN_MONETIZATION_API.md](./ADMIN_MONETIZATION_API.md#transactions-ledger) |
-| Email Campaigns | `/email-campaigns` | [ADMIN_EMAIL_CAMPAIGNS_API.md](./ADMIN_EMAIL_CAMPAIGNS_API.md) |
-| Announcements | `/announcements` | [ADMIN_ANNOUNCEMENTS_API.md](./ADMIN_ANNOUNCEMENTS_API.md) |
+| **Email Campaigns** | `/email-campaigns` | [ADMIN_EMAIL_CAMPAIGNS_API.md](./ADMIN_EMAIL_CAMPAIGNS_API.md) |
+| **Announcements** | `/announcements` | [ADMIN_ANNOUNCEMENTS_API.md](./ADMIN_ANNOUNCEMENTS_API.md) |
 
 ---
 
 ## Monetization & campaigns
 
-All previously stubbed endpoints are now live with MongoDB persistence. See module docs above for full CRUD details.
+Admin CRUD is live with MongoDB. App coin wallets / donations / super chats / withdrawals: [WALLET_API.md](./WALLET_API.md). Stripe Checkout is wired for subscriptions + coin purchases (webhook at `/api/webhook/stripe`).
 
-**Note:** Payment provider (Stripe, etc.) and email provider (SendGrid, SES) are not wired yet — admins can record data via API; real charges/email delivery require provider integration.
+**Note:** Mobile App Store builds should eventually use IAP for digital coins/subscriptions; Stripe remains correct for web checkout and for withdrawal payouts (Stripe Connect).
 
 ---
 

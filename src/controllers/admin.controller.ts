@@ -709,6 +709,16 @@ export const listSubscriptionPlans = async (req: AuthRequest, res: Response) => 
   }
 };
 
+export const getSubscriptionPlan = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json({
+      plan: await adminMonetization.getSubscriptionPlan(paramStr(req.params.id)),
+    });
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
 export const createSubscriptionPlan = async (req: AuthRequest, res: Response) => {
   try {
     const plan = await adminMonetization.createSubscriptionPlan(req.body ?? {});

@@ -111,10 +111,30 @@ export const STRIPE_WEBHOOK_SECRET = (process.env.STRIPE_WEBHOOK_SECRET ?? "").t
 export const STRIPE_PRICE_MONTHLY = (process.env.STRIPE_PRICE_MONTHLY ?? "").trim();
 export const STRIPE_PRICE_YEARLY = (process.env.STRIPE_PRICE_YEARLY ?? "").trim();
 
-/** Coins pricing (USD cents) */
+/** Coins pricing (USD cents) and IAP product SKUs */
 export const COINS_PACKAGES = [
-  { coins: 100, priceCents: 99, label: "100 Coins" },
-  { coins: 500, priceCents: 399, label: "500 Coins" },
-  { coins: 1000, priceCents: 699, label: "1000 Coins" },
-  { coins: 5000, priceCents: 2999, label: "5000 Coins" },
+  { name: "Starter", coins: 100, priceCents: 99, label: "100 Coins", tag: "Entry", positioning: "Entry", bonusText: "", appStoreProductId: "com.shawntorres.ineedprayer.coins100", googlePlayProductId: "coins100" },
+  { name: "Popular", coins: 525, priceCents: 499, label: "525 Coins", tag: "Popular", positioning: "Popular", bonusText: "500 + 25 bonus", appStoreProductId: "com.shawntorres.ineedprayer.coins500", googlePlayProductId: "coins500" },
+  { name: "Supporter", coins: 1100, priceCents: 999, label: "1,100 Coins", tag: "Supporter", positioning: "Supporter", bonusText: "1,000 + 100 bonus", appStoreProductId: "com.shawntorres.ineedprayer.coins1000", googlePlayProductId: "coins1000" },
+  { name: "Best Value", coins: 2750, priceCents: 2499, label: "2,750 Coins", tag: "Best Value", positioning: "Best Value", bonusText: "2,500 + 250 bonus", appStoreProductId: "com.shawntorres.ineedprayer.coins2500", googlePlayProductId: "coins2500" },
+  { name: "Patron", coins: 5750, priceCents: 4999, label: "5,750 Coins", tag: "Patron", positioning: "Patron", bonusText: "5,000 + 750 bonus", appStoreProductId: "com.shawntorres.ineedprayer.coins5000", googlePlayProductId: "coins5000" },
 ];
+
+/** Platform fee taken from donations / super chats before crediting group/church (basis points). 1000 = 10%. */
+export const PLATFORM_FEE_BPS = Math.min(
+  5000,
+  Math.max(0, parseInt(process.env.PLATFORM_FEE_BPS ?? "1000", 10) || 1000)
+);
+
+/** Withdrawal estimate: cents paid out per coin (1 = $0.01). */
+export const COIN_WITHDRAW_VALUE_CENTS = Math.max(
+  1,
+  parseInt(process.env.COIN_WITHDRAW_VALUE_CENTS ?? "1", 10) || 1
+);
+
+/** Custom coin purchase bounds */
+export const CUSTOM_COINS_MIN = 50;
+export const CUSTOM_COINS_MAX = 50_000;
+
+/** Price per coin for custom purchases (cents), aligned with ~100 coins = $0.99 */
+export const CUSTOM_COIN_UNIT_CENTS = 0.99;

@@ -386,6 +386,9 @@ export async function createChurch(
     role: "owner",
   });
 
+  const { ensureEntityWallet } = await import("./wallet.service.js");
+  void ensureEntityWallet("church", c._id.toString());
+
   const church = await getChurch(c._id.toString(), userId);
 
   const { recordAdminActivity } = await import(

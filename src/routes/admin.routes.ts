@@ -100,6 +100,7 @@ router.delete("/subscriptions/:id", admin.deleteSubscription);
 
 router.get("/subscription-plans", admin.listSubscriptionPlans);
 router.post("/subscription-plans", admin.createSubscriptionPlan);
+router.get("/subscription-plans/:id", admin.getSubscriptionPlan);
 router.patch("/subscription-plans/:id", admin.updateSubscriptionPlan);
 router.delete("/subscription-plans/:id", admin.deleteSubscriptionPlan);
 

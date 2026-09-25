@@ -4,6 +4,8 @@ import * as subscriptionController from "../controllers/subscription.controller.
 
 const router = Router();
 
+router.get("/plans", subscriptionController.getPlans);
+router.get("/plans/active", subscriptionController.getPlans);
 router.get("/status", protect, subscriptionController.getStatus);
 router.post("/subscribe", protect, subscriptionController.subscribe);
 router.post("/cancel", protect, subscriptionController.cancel);

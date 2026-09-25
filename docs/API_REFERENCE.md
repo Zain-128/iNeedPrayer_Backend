@@ -137,7 +137,7 @@ Liveness check.
 }
 ```
 
-`socialLoginProvider`: `google` | `facebook` | `apple` | `twitter`
+`socialLoginProvider`: `google` | `facebook` | `apple` | `twitter` | `x`
 
 **Response `200`**
 
