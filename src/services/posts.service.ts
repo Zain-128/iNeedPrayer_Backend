@@ -195,6 +195,9 @@ export async function createPost(
   body: {
     text?: string;
     image?: string;
+    images?: string[];
+    video?: string;
+    videos?: string[];
     mode?: "prayer" | "praise";
     groupId?: string;
     churchId?: string;
@@ -209,12 +212,31 @@ export async function createPost(
     body.sourceLanguage
   );
 
+  const imagesList = (Array.isArray(body.images) ? body.images : [])
+    .map((img) => (typeof img === "string" ? img.trim() : ""))
+    .filter(Boolean);
+  if (!imagesList.length && typeof body.image === "string" && body.image.trim()) {
+    imagesList.push(body.image.trim());
+  }
+  const primaryImage = body.image?.trim() || imagesList[0] || "";
+
+  const videosList = (Array.isArray(body.videos) ? body.videos : [])
+    .map((vid) => (typeof vid === "string" ? vid.trim() : ""))
+    .filter(Boolean);
+  if (!videosList.length && typeof body.video === "string" && body.video.trim()) {
+    videosList.push(body.video.trim());
+  }
+  const primaryVideo = body.video?.trim() || videosList[0] || "";
+
   const post = await Post.create({
     author: authorId,
     text: rawText,
     sourceLanguage,
     translations,
-    image: body.image?.trim() ?? "",
+    image: primaryImage,
+    images: imagesList,
+    video: primaryVideo,
+    videos: videosList,
     mode: body.mode === "praise" ? "praise" : "prayer",
     group: body.groupId || null,
     church: body.churchId || null,
@@ -259,6 +281,9 @@ export async function updatePost(
   body: {
     text?: string;
     image?: string;
+    images?: string[];
+    video?: string;
+    videos?: string[];
     mode?: "prayer" | "praise";
     sourceLanguage?: string;
   }
@@ -277,7 +302,31 @@ export async function updatePost(
     post.sourceLanguage = sourceLanguage;
     post.translations = translations as never;
   }
-  if (body.image !== undefined) post.image = body.image.trim();
+
+  if (body.images !== undefined || body.image !== undefined) {
+    const imagesList = (Array.isArray(body.images) ? body.images : [])
+      .map((img) => (typeof img === "string" ? img.trim() : ""))
+      .filter(Boolean);
+    if (!imagesList.length && typeof body.image === "string" && body.image.trim()) {
+      imagesList.push(body.image.trim());
+    }
+    const primaryImage = body.image?.trim() || imagesList[0] || "";
+    post.image = primaryImage;
+    post.images = imagesList;
+  }
+
+  if (body.videos !== undefined || body.video !== undefined) {
+    const videosList = (Array.isArray(body.videos) ? body.videos : [])
+      .map((vid) => (typeof vid === "string" ? vid.trim() : ""))
+      .filter(Boolean);
+    if (!videosList.length && typeof body.video === "string" && body.video.trim()) {
+      videosList.push(body.video.trim());
+    }
+    const primaryVideo = body.video?.trim() || videosList[0] || "";
+    post.video = primaryVideo;
+    post.videos = videosList;
+  }
+
   if (body.mode !== undefined)
     post.mode = body.mode === "praise" ? "praise" : "prayer";
   await post.save();

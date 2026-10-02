@@ -205,8 +205,11 @@ export async function listActivityNotifications(
     }),
   ]);
 
-  return {
-    data: docs.map((a) => ({
+  const items = docs.map((a) => {
+    const isRead = (a.readBy ?? []).some(
+      (id) => id.toString() === adminUserId
+    );
+    return {
       id: a._id.toString(),
       type: a.type,
       title: a.title,
@@ -217,31 +220,43 @@ export async function listActivityNotifications(
       actorName: a.actorName || "",
       actorAvatar: a.actorAvatar || "",
       meta: a.meta ?? {},
-      read: (a.readBy ?? []).some(
-        (id) => id.toString() === adminUserId
-      ),
+      isRead,
+      read: isRead,
       createdAt: a.createdAt,
       time: formatDisplayDate(a.createdAt),
-    })),
-    meta: listMeta(page, limit, total),
+    };
+  });
+
+  return {
+    data: items,
+    notifications: items,
+    items,
     unreadCount,
+    meta: listMeta(page, limit, total),
   };
 }
 
 export async function markActivityRead(id: string, adminUserId: string) {
   if (!mongoose.isValidObjectId(id)) throw httpError("Invalid id", 400);
+  const adminOid = new mongoose.Types.ObjectId(adminUserId);
   const result = await AdminActivity.updateOne(
     { _id: id },
-    { $addToSet: { readBy: adminUserId } }
+    { $addToSet: { readBy: adminOid } }
   );
-  if (!result.matchedCount) throw httpError("Activity not found", 404);
-  return { message: "Marked as read", id };
+  if (!result.matchedCount) throw httpError("Activity notification not found", 404);
+
+  const unreadCount = await AdminActivity.countDocuments({
+    readBy: { $ne: adminOid },
+  });
+
+  return { message: "Marked as read", id, isRead: true, read: true, unreadCount };
 }
 
 export async function markAllActivitiesRead(adminUserId: string) {
+  const adminOid = new mongoose.Types.ObjectId(adminUserId);
   await AdminActivity.updateMany(
-    { readBy: { $ne: new mongoose.Types.ObjectId(adminUserId) } },
-    { $addToSet: { readBy: adminUserId } }
+    { readBy: { $ne: adminOid } },
+    { $addToSet: { readBy: adminOid } }
   );
-  return { message: "All marked as read" };
+  return { message: "All marked as read", unreadCount: 0 };
 }

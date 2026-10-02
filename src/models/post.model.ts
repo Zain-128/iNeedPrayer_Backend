@@ -18,6 +18,9 @@ const postSchema = new mongoose.Schema(
       default: {},
     },
     image: { type: String, default: "" },
+    images: { type: [String], default: [] },
+    video: { type: String, default: "" },
+    videos: { type: [String], default: [] },
     mode: {
       type: String,
       enum: ["prayer", "praise"],

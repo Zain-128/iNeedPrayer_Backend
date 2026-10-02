@@ -45,6 +45,9 @@ export function mapPost(
     sourceLanguage?: string;
     translations?: Map<string, string> | Record<string, string>;
     image?: string;
+    images?: string[];
+    video?: string;
+    videos?: string[];
     mode?: string;
     praysCount: number;
     praisesCount: number;
@@ -88,6 +91,24 @@ export function mapPost(
 
   const authorId = post.author?._id?.toString?.() ?? "";
   const isMine = !!(opts?.viewerId && authorId && opts.viewerId === authorId);
+
+  const rawImages =
+    Array.isArray(post.images) && post.images.length > 0
+      ? post.images
+      : post.image
+        ? [post.image]
+        : [];
+  const images = rawImages.map((u) => normalizeMediaUrl(u)).filter(Boolean);
+  const primaryImage = images[0] ?? normalizeMediaUrl(post.image ?? "");
+
+  const rawVideos =
+    Array.isArray(post.videos) && post.videos.length > 0
+      ? post.videos
+      : post.video
+        ? [post.video]
+        : [];
+  const videos = rawVideos.map((u) => normalizeMediaUrl(u)).filter(Boolean);
+  const primaryVideo = videos[0] ?? normalizeMediaUrl(post.video ?? "");
 
   const groupId =
     post.group && typeof post.group === "object"
@@ -159,7 +180,10 @@ export function mapPost(
     ...(translations && Object.keys(translations).length
       ? { translations }
       : {}),
-    image: normalizeMediaUrl(post.image ?? ""),
+    image: primaryImage,
+    images,
+    video: primaryVideo,
+    videos,
     mode: post.mode ?? "prayer",
     ...(group ? { group } : {}),
     ...(groupId ? { groupId } : {}),

@@ -27,16 +27,18 @@ function getClient(): S3Client {
 
 function contentTypeForExt(ext: string): string {
   if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
   return "image/jpeg";
 }
 
 /**
  * Uploads bytes to Backblaze B2 via S3-compatible API. Returns the public HTTPS URL.
  */
-export async function uploadImageToB2(
+export async function uploadFileToB2(
   objectKey: string,
   body: Buffer,
-  ext: string
+  contentType: string
 ): Promise<string> {
   const c = getClient();
   await c.send(
@@ -44,9 +46,17 @@ export async function uploadImageToB2(
       Bucket: B2_BUCKET,
       Key: objectKey,
       Body: body,
-      ContentType: contentTypeForExt(ext),
+      ContentType: contentType,
       CacheControl: "public, max-age=31536000, immutable",
     })
   );
   return `${B2_PUBLIC_URL_BASE}/${objectKey}`;
+}
+
+export async function uploadImageToB2(
+  objectKey: string,
+  body: Buffer,
+  ext: string
+): Promise<string> {
+  return uploadFileToB2(objectKey, body, contentTypeForExt(ext));
 }

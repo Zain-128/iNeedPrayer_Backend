@@ -255,9 +255,49 @@ export function registerLiveSocket(io: Server) {
 
     socket.on(
       "host-heartbeat",
-      async (data: { scope?: string; entityId?: string }) => {
-        const scope = data?.scope;
-        const entityId = data?.entityId;
+      async (
+        data:
+          | { scope?: string; entityId?: string; sessionId?: string }
+          | string
+      ) => {
+        let scope =
+          typeof data === "object"
+            ? (data?.scope as "church" | "group")
+            : undefined;
+        let entityId = typeof data === "object" ? data?.entityId : undefined;
+        const sessionId =
+          typeof data === "string"
+            ? data
+            : typeof data === "object"
+              ? data?.sessionId
+              : undefined;
+
+        if (
+          (!scope || !entityId) &&
+          sessionId &&
+          mongoose.isValidObjectId(sessionId)
+        ) {
+          const { LiveStreamSession } = await import(
+            "../models/liveStreamSession.model.js"
+          );
+          const session = await LiveStreamSession.findById(sessionId)
+            .select("churchId groupId status hostUserId")
+            .lean();
+          if (
+            session &&
+            session.status === "live" &&
+            session.hostUserId.toString() === userId
+          ) {
+            if (session.churchId) {
+              scope = "church";
+              entityId = session.churchId.toString();
+            } else if (session.groupId) {
+              scope = "group";
+              entityId = session.groupId.toString();
+            }
+          }
+        }
+
         if (
           (scope !== "church" && scope !== "group") ||
           !entityId ||
@@ -378,6 +418,7 @@ export function registerLiveSocket(io: Server) {
 
           const comment: LiveComment = {
             id: commentId.toString(),
+            _id: commentId.toString(),
             sessionId,
             userId,
             userName,

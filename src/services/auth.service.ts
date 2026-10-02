@@ -89,6 +89,37 @@ function mapUser(u: {
   };
 }
 
+import { getIo } from "../socket/ioSingleton.js";
+
+function emitUserCreated(user: {
+  _id: { toString(): string };
+  name: string;
+  email: string;
+  avatar?: string;
+  role?: string;
+  status?: string;
+  createdAt: Date;
+}) {
+  try {
+    const io = getIo();
+    if (io) {
+      io.emit("user:created", {
+        user: {
+          id: user._id.toString(),
+          name: user.name,
+          email: user.email,
+          avatar: user.avatar || "",
+          role: user.role || "user",
+          status: user.status || "active",
+          createdAt: user.createdAt,
+        },
+      });
+    }
+  } catch (err) {
+    console.error("[socket] user:created emit error:", err);
+  }
+}
+
 export const register = async (input: RegisterInput): Promise<AuthResult> => {
   const existing = await User.findOne({ email: input.email.toLowerCase() });
   if (existing) {
@@ -105,6 +136,8 @@ export const register = async (input: RegisterInput): Promise<AuthResult> => {
 
   const { ensureUserWallet } = await import("./wallet.service.js");
   void ensureUserWallet(user._id.toString());
+
+  emitUserCreated(user);
 
   const { recordAdminActivity } = await import(
     "./admin/adminActivity.service.js"
@@ -246,6 +279,8 @@ export const socialLogin = async (
 
       const { ensureUserWallet } = await import("./wallet.service.js");
       void ensureUserWallet(user._id.toString());
+
+      emitUserCreated(user);
 
       const { recordAdminActivity } = await import(
         "./admin/adminActivity.service.js"

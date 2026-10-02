@@ -14,6 +14,7 @@ import * as adminAnnouncements from "../services/admin/adminAnnouncements.servic
 import * as adminEvents from "../services/admin/adminEvents.service.js";
 import * as adminPush from "../services/admin/adminPush.service.js";
 import * as adminSettings from "../services/admin/adminSettings.service.js";
+import * as adminSearch from "../services/admin/adminSearch.service.js";
 import { paramStr } from "../utils/routeParams.js";
 
 function handle(res: Response, err: unknown) {
@@ -207,6 +208,23 @@ export const analytics = async (req: AuthRequest, res: Response) => {
   try {
     const range = req.query.range === "week" ? "week" : "month";
     return res.json(await adminDashboard.getAnalyticsOverview(range));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const globalSearch = async (req: AuthRequest, res: Response) => {
+  try {
+    const queryStr =
+      typeof req.query.q === "string"
+        ? req.query.q
+        : typeof req.query.search === "string"
+          ? req.query.search
+          : typeof req.query.query === "string"
+            ? req.query.query
+            : "";
+    const limit = req.query.limit ? Number(req.query.limit) : 5;
+    return res.json(await adminSearch.globalSearch(queryStr, limit));
   } catch (err) {
     return handle(res, err);
   }

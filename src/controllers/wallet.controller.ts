@@ -99,15 +99,24 @@ export const verifyIapPurchase = async (req: AuthRequest, res: Response) => {
 export const donate = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
-    const scope = scopeFromParam(req.body?.scope);
-    const entityId = String(req.body?.entityId ?? "");
-    const coins = Number(req.body?.coins);
-    const message =
-      typeof req.body?.message === "string" ? req.body.message : "";
+
+    let scope: "group" | "church" | null = scopeFromParam(req.body?.scope);
+    let entityId = String(
+      req.body?.entityId ||
+      req.body?.churchId ||
+      req.body?.groupId ||
+      req.body?.recipientId ||
+      ""
+    );
 
     if (!scope) {
-      return res.status(400).json({ message: "scope must be group or church" });
+      if (req.body?.churchId) scope = "church";
+      else if (req.body?.groupId) scope = "group";
+      else scope = "church";
     }
+
+    const coins = Number(req.body?.coins || req.body?.amount || 0);
+    const message = typeof req.body?.message === "string" ? req.body.message : "";
 
     const result = await walletService.spendCoinsToEntity({
       userId: req.userId,
@@ -127,16 +136,38 @@ export const donate = async (req: AuthRequest, res: Response) => {
 export const superChat = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
-    const scope = scopeFromParam(req.body?.scope);
-    const entityId = String(req.body?.entityId ?? "");
-    const sessionId = String(req.body?.sessionId ?? "");
-    const coins = Number(req.body?.coins);
-    const message =
-      typeof req.body?.message === "string" ? req.body.message : "";
 
-    if (!scope) {
-      return res.status(400).json({ message: "scope must be group or church" });
+    let scope: "group" | "church" | null = scopeFromParam(req.body?.scope);
+    let entityId = String(
+      req.body?.entityId ||
+      req.body?.churchId ||
+      req.body?.groupId ||
+      ""
+    );
+    const sessionId = String(
+      req.body?.sessionId ||
+      req.body?.streamId ||
+      ""
+    );
+
+    if ((!entityId || !scope) && sessionId) {
+      const { LiveStreamSession } = await import("../models/liveStreamSession.model.js");
+      const session = await LiveStreamSession.findById(sessionId).lean();
+      if (session) {
+        if (session.churchId) {
+          scope = "church";
+          entityId = session.churchId.toString();
+        } else if (session.groupId) {
+          scope = "group";
+          entityId = session.groupId.toString();
+        }
+      }
     }
+
+    if (!scope) scope = "church";
+
+    const coins = Number(req.body?.coins || req.body?.amount || 0);
+    const message = typeof req.body?.message === "string" ? req.body.message : "";
 
     const result = await walletService.spendCoinsToEntity({
       userId: req.userId,

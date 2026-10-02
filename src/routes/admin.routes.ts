@@ -17,7 +17,9 @@ router.use(protectAdmin);
 router.get("/auth/me", admin.me);
 router.post("/auth/logout", admin.logout);
 
-// Dashboard (Home page)
+// Dashboard (Home page) & Global Search
+router.get("/search", admin.globalSearch);
+router.get("/dashboard/search", admin.globalSearch);
 router.get("/dashboard/home", admin.home);
 router.get("/dashboard/metrics", admin.metrics);
 router.get("/dashboard/prayer-activity", admin.prayerActivity);
@@ -86,7 +88,15 @@ router.post(
   "/activity-notifications/read-all",
   admin.markAllActivitiesRead
 );
+router.patch(
+  "/activity-notifications/read-all",
+  admin.markAllActivitiesRead
+);
 router.post(
+  "/activity-notifications/:id/read",
+  admin.markActivityRead
+);
+router.patch(
   "/activity-notifications/:id/read",
   admin.markActivityRead
 );

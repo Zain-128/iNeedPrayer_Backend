@@ -3,6 +3,7 @@ import { LiveStreamComment } from "../models/liveStreamComment.model.js";
 
 export type PersistedLiveComment = {
   id: string;
+  _id: string;
   sessionId: string;
   userId: string;
   userName: string;
@@ -84,8 +85,10 @@ function mapComment(doc: {
   text: string;
   createdAt: Date;
 }): PersistedLiveComment {
+  const idStr = doc._id.toString();
   return {
-    id: doc._id.toString(),
+    id: idStr,
+    _id: idStr,
     sessionId: doc.sessionId.toString(),
     userId: doc.userId.toString(),
     userName: doc.userName,

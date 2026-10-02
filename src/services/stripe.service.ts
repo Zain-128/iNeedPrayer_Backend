@@ -14,8 +14,16 @@ import { PlatformTransaction } from "../models/platformTransaction.model.js";
 let _stripe: Stripe | null = null;
 
 export function getStripe(): Stripe {
-  if (!STRIPE_SECRET_KEY) {
-    throw new Error("STRIPE_SECRET_KEY is not configured");
+  if (
+    !STRIPE_SECRET_KEY ||
+    STRIPE_SECRET_KEY.includes("placeholder") ||
+    STRIPE_SECRET_KEY.includes("****")
+  ) {
+    const err = new Error(
+      "Stripe API Key is not configured properly on the backend. Please set a valid STRIPE_SECRET_KEY (sk_test_... or sk_live_...) in your server environment/.env file."
+    );
+    (err as any).statusCode = 400;
+    throw err;
   }
   if (!_stripe) {
     _stripe = new Stripe(STRIPE_SECRET_KEY, {
