@@ -1,0 +1,772 @@
+import mongoose from "mongoose";
+import { Church } from "../models/church.model.js";
+import { ChurchFollow } from "../models/churchFollow.model.js";
+import { ChurchMember } from "../models/churchMember.model.js";
+import { User } from "../models/user.model.js";
+import { CHURCH_VERIFY_CODE, isSmtpConfigured } from "../contants.js";
+import { queueEmail, sendEmail } from "./email/mailer.js";
+import {
+  churchVerificationCodeEmail,
+  churchVerifiedEmail,
+} from "./email/templates.js";
+
+const CHURCH_CODE_TTL_MINUTES = 15;
+
+/** Fixed stub code is only accepted while no SMTP is configured (dev/testing). */
+function isChurchStubCode(code: string | null | undefined): boolean {
+  return !isSmtpConfigured() && !!code && code === CHURCH_VERIFY_CODE;
+}
+import { formatCountLabel } from "../utils/mappers.js";
+import {
+  normalizeChurchInput,
+  validateCreateChurchInput,
+  type NormalizedChurchInput,
+} from "../utils/churchInput.js";
+
+export type ChurchFilter =
+  | "recommended"
+  | "most_followed"
+  | "nearest"
+  | "trending_posts"
+  | "trending_search";
+
+export type ChurchMemberRole = "owner" | "admin" | "member";
+
+type ChurchMutable = {
+  name: string;
+  email: string;
+  isVerified: boolean;
+  verificationCode: string | null;
+  verificationCodeExpiresAt: Date | null;
+  createdBy?: mongoose.Types.ObjectId | null;
+  memberCount?: number;
+  followerCount: number;
+  save(): Promise<unknown>;
+  deleteOne(): Promise<unknown>;
+  set(update: Record<string, unknown>): void;
+};
+
+type ChurchDoc = mongoose.FlattenMaps<Record<string, unknown>> & {
+  _id: mongoose.Types.ObjectId;
+  name: string;
+  locationShort: string;
+  locationFull?: string;
+  country?: string;
+  state?: string;
+  city?: string;
+  streetAddress?: string;
+  landmark?: string;
+  followerCount: number;
+  memberCount?: number;
+  image: string;
+  bannerImage?: string;
+  website?: string;
+  email?: string;
+  phone?: string;
+  denomination?: string;
+  shortBio?: string;
+  about?: string;
+  liveStreamUrl?: string;
+  pastorName?: string;
+  socialLinks?: Array<{ platform?: string; url?: string }>;
+  isVerified?: boolean;
+  createdBy?: mongoose.Types.ObjectId | null;
+};
+
+function generateVerificationCode(): string {
+  return String(Math.floor(10000 + Math.random() * 90000));
+}
+
+async function assertChurchManager(
+  churchId: string,
+  userId: string
+): Promise<{ church: ChurchMutable }> {
+  const church = await Church.findById(churchId);
+  if (!church) {
+    const err = new Error("Church not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  const doc = church as unknown as ChurchMutable;
+  if (church.createdBy?.toString() === userId) {
+    return { church: doc };
+  }
+  const member = await ChurchMember.findOne({
+    church: churchId,
+    user: userId,
+    role: { $in: ["owner", "admin"] },
+  });
+  if (!member) {
+    const err = new Error("Not allowed");
+    (err as Error & { statusCode?: number }).statusCode = 403;
+    throw err;
+  }
+  return { church: doc };
+}
+
+function mapChurch(
+  c: ChurchDoc,
+  userId?: string,
+  followedSet?: Set<string>,
+  myChurchSet?: Set<string>
+) {
+  const id = c._id.toString();
+  const banner = c.bannerImage || c.image || "";
+  const image = c.image ?? "";
+  const email = c.email ?? "";
+  const phone = c.phone ?? "";
+  const about = c.about ?? "";
+  const pastorName = c.pastorName ?? "";
+  const socialLinks = (c.socialLinks ?? [])
+    .filter((s) => s?.platform && s?.url)
+    .map((s) => ({
+      platform: String(s.platform).trim(),
+      url: String(s.url).trim(),
+    }));
+
+  return {
+    id,
+    // Canonical fields
+    name: c.name,
+    locationShort: c.locationShort ?? "",
+    locationFull: c.locationFull ?? "",
+    country: c.country ?? "",
+    state: c.state ?? "",
+    city: c.city ?? "",
+    streetAddress: c.streetAddress ?? "",
+    landmark: c.landmark ?? "",
+    followersLabel: formatCountLabel(c.followerCount ?? 0, "followers"),
+    membersLabel: formatCountLabel(c.memberCount ?? 1, "members"),
+    image,
+    bannerImage: banner,
+    banner,
+    website: c.website ?? "",
+    email,
+    phone,
+    denomination: c.denomination ?? "",
+    shortBio: c.shortBio ?? "",
+    about,
+    liveStreamUrl: c.liveStreamUrl ?? "",
+    pastorName,
+    socialLinks,
+    isVerified: !!c.isVerified,
+    isFollowed: userId && followedSet ? followedSet.has(id) : false,
+    isMyChurch:
+      userId && myChurchSet
+        ? myChurchSet.has(id)
+        : c.createdBy?.toString() === userId,
+    followerCount: c.followerCount ?? 0,
+    memberCount: c.memberCount ?? 1,
+
+    // UI aliases (CreateChurch / EditChurch payload shape)
+    churchName: c.name,
+    businessEmail: email,
+    businessPhone: phone,
+    pastorOrLeaderName: pastorName,
+    aboutChurch: about,
+    logo: image,
+  };
+}
+
+async function loadUserContext(userId?: string) {
+  let followedSet = new Set<string>();
+  let myChurchSet = new Set<string>();
+  if (!userId) return { followedSet, myChurchSet };
+
+  const [follows, owned, adminMemberships] = await Promise.all([
+    ChurchFollow.find({ user: userId }).select("church").lean(),
+    Church.find({ createdBy: userId }).select("_id").lean(),
+    ChurchMember.find({ user: userId }).select("church role").lean(),
+  ]);
+
+  followedSet = new Set(follows.map((f) => f.church.toString()));
+  myChurchSet = new Set(owned.map((m) => m._id.toString()));
+  for (const m of adminMemberships) {
+    if (m.role === "owner" || m.role === "admin") {
+      myChurchSet.add(m.church.toString());
+    }
+  }
+  return { followedSet, myChurchSet };
+}
+
+export async function listChurches(opts: {
+  userId?: string;
+  q?: string;
+  filter?: ChurchFilter;
+  tab?: "my" | "followed";
+}) {
+  let sort: Record<string, 1 | -1> = { followerCount: -1 };
+  if (
+    opts.filter === "nearest" ||
+    opts.filter === "trending_posts" ||
+    opts.filter === "trending_search"
+  ) {
+    sort = { updatedAt: -1 };
+  }
+
+  const q = opts.q?.trim();
+  const rx = q
+    ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+    : null;
+  const mongoFilter: Record<string, unknown> = rx
+    ? {
+        $or: [
+          { name: rx },
+          { locationShort: rx },
+          { about: rx },
+          { city: rx },
+          { country: rx },
+        ],
+      }
+    : {};
+
+  // Public browse only shows approved churches; "my" / "followed" keep owner's view
+  if (opts.tab !== "my" && opts.tab !== "followed") {
+    mongoFilter.status = "Approved";
+  }
+
+  let docs = await Church.find(mongoFilter).sort(sort).limit(100).lean();
+
+  const { followedSet, myChurchSet } = await loadUserContext(opts.userId);
+
+  if (opts.userId && opts.tab === "my") {
+    docs = docs.filter((c) => myChurchSet.has(c._id.toString()));
+  }
+  if (opts.userId && opts.tab === "followed") {
+    docs = docs.filter((c) => followedSet.has(c._id.toString()));
+  }
+
+  return docs.map((c) =>
+    mapChurch(c as ChurchDoc, opts.userId, followedSet, myChurchSet)
+  );
+}
+
+export async function discoverChurches(opts: { userId?: string; q?: string }) {
+  const q = opts.q?.trim();
+  const rx = q
+    ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+    : null;
+  const mongoFilter: Record<string, unknown> = {
+    status: "Approved",
+    ...(rx
+      ? {
+          $or: [{ name: rx }, { locationShort: rx }, { city: rx }],
+        }
+      : {}),
+  };
+
+  let docs = await Church.find(mongoFilter)
+    .sort({ followerCount: -1 })
+    .limit(100)
+    .lean();
+
+  const { followedSet, myChurchSet } = await loadUserContext(opts.userId);
+
+  if (opts.userId) {
+    docs = docs.filter(
+      (c) =>
+        !myChurchSet.has(c._id.toString()) &&
+        !followedSet.has(c._id.toString())
+    );
+  }
+
+  return docs.map((c) =>
+    mapChurch(c as ChurchDoc, opts.userId, followedSet, myChurchSet)
+  );
+}
+
+export async function getChurch(id: string, userId?: string) {
+  const c = await Church.findById(id).lean();
+  if (!c) {
+    const err = new Error("Church not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  const { followedSet, myChurchSet } = await loadUserContext(userId);
+  const isMine = userId ? myChurchSet.has(c._id.toString()) : false;
+  if (
+    (c.status === "Suspended" || c.status === "Rejected") &&
+    !isMine
+  ) {
+    const err = new Error("Church not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  return mapChurch(c as ChurchDoc, userId, followedSet, myChurchSet);
+}
+
+function applyNormalizedToChurch(
+  church: ChurchMutable,
+  input: NormalizedChurchInput,
+  partial = false
+) {
+  const fields: (keyof NormalizedChurchInput)[] = [
+    "name",
+    "website",
+    "country",
+    "state",
+    "city",
+    "streetAddress",
+    "landmark",
+    "locationShort",
+    "locationFull",
+    "email",
+    "phone",
+    "shortBio",
+    "about",
+    "image",
+    "bannerImage",
+    "denomination",
+    "liveStreamUrl",
+    "pastorName",
+  ];
+  for (const f of fields) {
+    const v = input[f];
+    if (typeof v !== "string") continue;
+    if (partial && v === "") continue;
+    if (!partial || v !== undefined) {
+      (church as unknown as Record<string, string>)[f] = v;
+    }
+  }
+
+  // socialLinks: on create always set; on PATCH only if client sent the key
+  if (!partial || input.socialLinksProvided) {
+    (church as unknown as Record<string, unknown>).socialLinks =
+      input.socialLinks ?? [];
+  }
+}
+
+export async function createChurch(
+  userId: string,
+  body: Record<string, unknown> | null | undefined,
+  opts?: { skipVerification?: boolean; verificationCode?: string }
+) {
+  const input = normalizeChurchInput(body);
+  const validationError = validateCreateChurchInput(input);
+  if (validationError) {
+    const err = new Error(validationError);
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  const existingOwned = await Church.findOne({ createdBy: userId }).select("_id");
+  if (existingOwned) {
+    const err = new Error("You can only create one church");
+    (err as Error & { statusCode?: number }).statusCode = 409;
+    throw err;
+  }
+
+  const code =
+    opts?.verificationCode?.trim() ||
+    (opts?.skipVerification ? null : generateVerificationCode());
+  const isVerified = opts?.skipVerification || isChurchStubCode(code);
+
+  const c = await Church.create({
+    name: input.name,
+    website: input.website,
+    country: input.country,
+    state: input.state,
+    city: input.city,
+    streetAddress: input.streetAddress,
+    landmark: input.landmark,
+    locationShort: input.locationShort,
+    locationFull: input.locationFull,
+    email: input.email,
+    phone: input.phone,
+    shortBio: input.shortBio,
+    about: input.about,
+    image: input.image,
+    bannerImage: input.bannerImage,
+    denomination: input.denomination,
+    liveStreamUrl: input.liveStreamUrl,
+    pastorName: input.pastorName,
+    socialLinks: input.socialLinks,
+    isVerified: !!isVerified,
+    verificationCode: isVerified ? null : code,
+    verificationCodeExpiresAt: isVerified
+      ? null
+      : new Date(Date.now() + CHURCH_CODE_TTL_MINUTES * 60 * 1000),
+    createdBy: userId,
+    memberCount: 1,
+  });
+
+  await ChurchMember.create({
+    user: userId,
+    church: c._id,
+    role: "owner",
+  });
+
+  const { ensureEntityWallet } = await import("./wallet.service.js");
+  void ensureEntityWallet("church", c._id.toString());
+
+  const church = await getChurch(c._id.toString(), userId);
+
+  if (!isVerified && code) {
+    queueEmail(
+      c.email,
+      churchVerificationCodeEmail({ churchName: c.name, code, minutes: CHURCH_CODE_TTL_MINUTES })
+    );
+  }
+
+  const { recordAdminActivity } = await import(
+    "./admin/adminActivity.service.js"
+  );
+  void recordAdminActivity({
+    type: isVerified ? "church_created" : "church_pending",
+    title: isVerified
+      ? "New church created"
+      : "New church pending verification",
+    message: c.name,
+    refType: "church",
+    refId: c._id.toString(),
+    actorId: userId,
+    meta: { isVerified: !!isVerified },
+  });
+
+  return {
+    church,
+    verificationRequired: !isVerified,
+    /** Dev only: returned while SMTP is not configured so the app can show it. */
+    devVerificationCode: !isVerified && !isSmtpConfigured() ? code : undefined,
+  };
+}
+
+export async function updateChurch(
+  churchId: string,
+  userId: string,
+  body: Record<string, unknown> | null | undefined
+) {
+  const { church } = await assertChurchManager(churchId, userId);
+  const input = normalizeChurchInput(body);
+  if (input.name === "" && (body as { name?: string })?.name !== "") {
+    const err = new Error("Church name is required");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  applyNormalizedToChurch(church, input, true);
+  if (input.name) church.name = input.name;
+  await church.save();
+  return getChurch(churchId, userId);
+}
+
+export async function deleteChurch(churchId: string, userId: string) {
+  const church = await Church.findById(churchId);
+  if (!church) {
+    const err = new Error("Church not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  if (church.createdBy?.toString() !== userId) {
+    const err = new Error("Only the church owner can delete");
+    (err as Error & { statusCode?: number }).statusCode = 403;
+    throw err;
+  }
+  await Promise.all([
+    ChurchFollow.deleteMany({ church: churchId }),
+    ChurchMember.deleteMany({ church: churchId }),
+    church.deleteOne(),
+  ]);
+  return { ok: true };
+}
+
+export async function sendChurchVerification(churchId: string, userId: string) {
+  const { church } = await assertChurchManager(churchId, userId);
+  if (church.isVerified) {
+    return { ok: true, alreadyVerified: true };
+  }
+  if (isSmtpConfigured() && !church.email?.trim()) {
+    const err = new Error("Add a church email address to receive the verification code");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  const code = generateVerificationCode();
+  church.verificationCode = code;
+  church.verificationCodeExpiresAt = new Date(Date.now() + CHURCH_CODE_TTL_MINUTES * 60 * 1000);
+  await church.save();
+
+  if (isSmtpConfigured()) {
+    const sent = await sendEmail(
+      church.email,
+      churchVerificationCodeEmail({ churchName: church.name, code, minutes: CHURCH_CODE_TTL_MINUTES })
+    );
+    if (!sent) {
+      const err = new Error("Could not send verification email. Please try again.");
+      (err as Error & { statusCode?: number }).statusCode = 502;
+      throw err;
+    }
+  }
+  return {
+    ok: true,
+    channel: "email",
+    target: church.email,
+    ...(isSmtpConfigured() ? {} : { devVerificationCode: code }),
+  };
+}
+
+export async function verifyChurch(
+  churchId: string,
+  code: string,
+  userId?: string
+) {
+  const raw = await Church.findById(churchId).select(
+    "+verificationCode +verificationCodeExpiresAt"
+  );
+  if (!raw) {
+    const err = new Error("Church not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  const church = raw as unknown as ChurchMutable;
+
+  const trimmed = String(code ?? "").trim();
+  const stubOk = isChurchStubCode(trimmed);
+  const storedOk =
+    church.verificationCode &&
+    trimmed === church.verificationCode &&
+    church.verificationCodeExpiresAt &&
+    church.verificationCodeExpiresAt > new Date();
+
+  if (!stubOk && !storedOk) {
+    const err = new Error("Invalid verification code");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  church.isVerified = true;
+  church.verificationCode = null;
+  church.verificationCodeExpiresAt = null;
+  await church.save();
+  queueEmail(church.email, churchVerifiedEmail(church.name));
+
+  return {
+    ok: true,
+    church: await getChurch(churchId, userId),
+  };
+}
+
+export async function toggleFollowChurch(userId: string, churchId: string) {
+  const church = await Church.findById(churchId);
+  if (!church) {
+    const err = new Error("Church not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  const ex = await ChurchFollow.findOne({ user: userId, church: churchId });
+  if (ex) {
+    await ex.deleteOne();
+    church.followerCount = Math.max(0, church.followerCount - 1);
+    await church.save();
+    return {
+      following: false,
+      followerCount: church.followerCount,
+      followersLabel: formatCountLabel(church.followerCount, "followers"),
+    };
+  }
+  await ChurchFollow.create({ user: userId, church: churchId });
+  church.followerCount += 1;
+  await church.save();
+  return {
+    following: true,
+    followerCount: church.followerCount,
+    followersLabel: formatCountLabel(church.followerCount, "followers"),
+  };
+}
+
+export async function listChurchMembers(churchId: string, userId: string) {
+  await assertChurchManager(churchId, userId);
+  const members = await ChurchMember.find({ church: churchId })
+    .populate("user", "name email avatar")
+    .sort({ role: 1, createdAt: 1 })
+    .lean();
+
+  return members.map((m) => ({
+    id: m._id.toString(),
+    userId: m.user?._id?.toString() ?? "",
+    name: (m.user as { name?: string })?.name ?? "",
+    email: (m.user as { email?: string })?.email ?? "",
+    avatar: (m.user as { avatar?: string })?.avatar ?? "",
+    role: m.role as ChurchMemberRole,
+    joinedAt: m.createdAt,
+  }));
+}
+
+export async function addChurchMember(
+  churchId: string,
+  actorId: string,
+  body: { userId?: string; email?: string; role?: ChurchMemberRole }
+) {
+  await assertChurchManager(churchId, actorId);
+
+  let targetUserId = body.userId?.trim();
+  if (!targetUserId && body.email?.trim()) {
+    const u = await User.findOne({ email: body.email.trim().toLowerCase() });
+    if (!u) {
+      const err = new Error("User not found for that email");
+      (err as Error & { statusCode?: number }).statusCode = 404;
+      throw err;
+    }
+    targetUserId = u._id.toString();
+  }
+  if (!targetUserId || !mongoose.isValidObjectId(targetUserId)) {
+    const err = new Error("userId or email is required");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  const role: ChurchMemberRole =
+    body.role === "admin" || body.role === "member" ? body.role : "member";
+
+  const church = await Church.findById(churchId);
+  if (!church) {
+    const err = new Error("Church not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+
+  const ex = await ChurchMember.findOne({ church: churchId, user: targetUserId });
+  if (ex) {
+    const err = new Error("User is already a church member");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  await ChurchMember.create({ church: churchId, user: targetUserId, role });
+  church.memberCount = (church.memberCount ?? 0) + 1;
+  await church.save();
+
+  const user = await User.findById(targetUserId).select("name email avatar").lean();
+  return {
+    member: {
+      userId: targetUserId,
+      name: user?.name ?? "",
+      email: user?.email ?? "",
+      avatar: user?.avatar ?? "",
+      role,
+    },
+    memberCount: church.memberCount,
+  };
+}
+
+export async function removeChurchMember(
+  churchId: string,
+  actorId: string,
+  targetUserId: string
+) {
+  await assertChurchManager(churchId, actorId);
+
+  const church = await Church.findById(churchId);
+  if (!church) {
+    const err = new Error("Church not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+
+  if (church.createdBy?.toString() === targetUserId) {
+    const err = new Error("Cannot remove the church owner");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  const ex = await ChurchMember.findOne({ church: churchId, user: targetUserId });
+  if (!ex) {
+    const err = new Error("Member not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+
+  await ex.deleteOne();
+  church.memberCount = Math.max(1, (church.memberCount ?? 1) - 1);
+  await church.save();
+  return { ok: true, memberCount: church.memberCount };
+}
+
+export async function updateChurchMemberRole(
+  churchId: string,
+  actorId: string,
+  targetUserId: string,
+  role: ChurchMemberRole
+) {
+  const church = await Church.findById(churchId);
+  if (!church) {
+    const err = new Error("Church not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+  if (church.createdBy?.toString() !== actorId) {
+    const err = new Error("Only the church owner can change roles");
+    (err as Error & { statusCode?: number }).statusCode = 403;
+    throw err;
+  }
+  if (targetUserId === actorId) {
+    const err = new Error("Cannot change owner role");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (role !== "admin" && role !== "member") {
+    const err = new Error("role must be admin or member");
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  const ex = await ChurchMember.findOne({ church: churchId, user: targetUserId });
+  if (!ex) {
+    const err = new Error("Member not found");
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+
+  ex.role = role;
+  await ex.save();
+  return { ok: true, userId: targetUserId, role };
+}
+
+export async function getNearbyChurches(opts: {
+  city?: string;
+  state?: string;
+  country?: string;
+  q?: string;
+  userId?: string;
+  limit?: number;
+}) {
+  const q = opts.q?.trim();
+  const filter: Record<string, unknown> = { status: "Approved" };
+
+  if (opts.city) filter.city = new RegExp(opts.city, "i");
+  if (opts.state) filter.state = new RegExp(opts.state, "i");
+  if (opts.country) filter.country = new RegExp(opts.country, "i");
+
+  if (q) {
+    const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    filter.$or = [{ name: rx }, { city: rx }, { streetAddress: rx }];
+  }
+
+  const { followedSet, myChurchSet } = await loadUserContext(opts.userId);
+
+  const docs = await Church.find(filter)
+    .sort({ followerCount: -1 })
+    .limit(Math.min(50, Math.max(1, opts.limit || 20)))
+    .lean();
+
+  return docs.map((c) => mapChurch(c as unknown as ChurchDoc, opts.userId, followedSet, myChurchSet));
+}
+
+export async function getChurchAnalytics(churchId: string, userId: string) {
+  const { church } = await assertChurchManager(churchId, userId);
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const [followers, newFollowers, members] = await Promise.all([
+    ChurchFollow.countDocuments({ church: churchId }),
+    ChurchFollow.countDocuments({ church: churchId, createdAt: { $gte: thirtyDaysAgo } }),
+    ChurchMember.countDocuments({ church: churchId }),
+  ]);
+
+  return {
+    churchId,
+    churchName: church.name,
+    followers: Math.max(followers, church.followerCount || 0),
+    newFollowersLast30Days: newFollowers,
+    members: Math.max(members, church.memberCount || 1),
+    isVerified: !!church.isVerified,
+  };
+}

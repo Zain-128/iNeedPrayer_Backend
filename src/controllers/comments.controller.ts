@@ -1,0 +1,90 @@
+import { Response } from "express";
+import mongoose from "mongoose";
+import { AuthRequest } from "../middleware/auth.middleware.js";
+import * as commentsService from "../services/comments.service.js";
+import * as reportsService from "../services/reports.service.js";
+import { paramStr } from "../utils/routeParams.js";
+
+export const editComment = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid id" });
+    }
+    const { text, image, removeImage } = req.body ?? {};
+    if (text === undefined && image === undefined && removeImage === undefined) {
+      return res.status(400).json({ message: "text or image is required to update comment" });
+    }
+    const comment = await commentsService.editComment(id, req.userId, {
+      text: typeof text === "string" ? text : undefined,
+      image: image !== undefined ? image : undefined,
+      removeImage: removeImage === true || removeImage === "true",
+    });
+    return res.json({ comment });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const deleteComment = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid id" });
+    }
+    await commentsService.deleteComment(id, req.userId);
+    return res.json({ message: "Deleted" });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const reportComment = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid id" });
+    }
+    const { reasonKey, otherText } = reportsService.parseReportBody(req.body);
+    await reportsService.reportComment(req.userId, id, reasonKey, otherText);
+    return res.json({ message: "Report submitted" });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const prayComment = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid id" });
+    }
+    const result = await commentsService.togglePray(id, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const praiseComment = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: "Invalid id" });
+    }
+    const result = await commentsService.togglePraise(id, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};

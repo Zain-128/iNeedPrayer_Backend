@@ -1,0 +1,61 @@
+/** Per-user comment rate limit for live chat (ms between messages). */
+export const LIVE_COMMENT_COOLDOWN_MS = 2000;
+/** Max comment length. */
+export const LIVE_COMMENT_MAX_LEN = 280;
+/** Max comments kept in memory per session room. */
+export const LIVE_COMMENT_BUFFER_SIZE = 100;
+/** How often to flush batched comments to clients (ms). */
+export const LIVE_COMMENT_BATCH_MS = 400;
+/** Minimum interval between viewer-count broadcasts (ms). */
+export const LIVE_VIEWER_COUNT_THROTTLE_MS = 3000;
+/** How often to flush batched hearts to clients (ms). */
+export const LIVE_HEART_BATCH_MS = 250;
+/** Min gap between heart taps from the same user (ms). Soft spam control. */
+export const LIVE_HEART_COOLDOWN_MS = 80;
+/** Max heart bursts kept in a single batch payload. */
+export const LIVE_HEART_BURST_BUFFER = 20;
+/** Persist likeCount to DB at most this often (ms). */
+export const LIVE_HEART_DB_FLUSH_MS = 2000;
+const commentBuckets = new Map();
+const heartBuckets = new Map();
+export function checkCommentRateLimit(sessionId, userId) {
+    const key = `${sessionId}:${userId}`;
+    const now = Date.now();
+    const prev = commentBuckets.get(key);
+    if (prev && now - prev.lastAt < LIVE_COMMENT_COOLDOWN_MS) {
+        return {
+            ok: false,
+            retryAfterMs: LIVE_COMMENT_COOLDOWN_MS - (now - prev.lastAt),
+        };
+    }
+    commentBuckets.set(key, { lastAt: now, count: (prev?.count ?? 0) + 1 });
+    return { ok: true };
+}
+export function checkHeartRateLimit(sessionId, userId) {
+    const key = `${sessionId}:${userId}`;
+    const now = Date.now();
+    const prev = heartBuckets.get(key);
+    if (prev && now - prev.lastAt < LIVE_HEART_COOLDOWN_MS) {
+        return {
+            ok: false,
+            retryAfterMs: LIVE_HEART_COOLDOWN_MS - (now - prev.lastAt),
+        };
+    }
+    heartBuckets.set(key, { lastAt: now, count: (prev?.count ?? 0) + 1 });
+    return { ok: true };
+}
+export function clearCommentRateLimit(sessionId, userId) {
+    commentBuckets.delete(`${sessionId}:${userId}`);
+}
+/** Periodic cleanup of stale buckets. */
+export function pruneCommentRateLimits(maxAgeMs = 60_000) {
+    const cutoff = Date.now() - maxAgeMs;
+    for (const [key, bucket] of commentBuckets) {
+        if (bucket.lastAt < cutoff)
+            commentBuckets.delete(key);
+    }
+    for (const [key, bucket] of heartBuckets) {
+        if (bucket.lastAt < cutoff)
+            heartBuckets.delete(key);
+    }
+}

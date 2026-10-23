@@ -103,10 +103,11 @@ Authenticate and get user + JWT.
     "_id": "...",
     "email": "user@example.com",
     "name": "John Doe",
-    "createdAt": "...",
-    "updatedAt": "..."
+    "createdAt": "..."
   },
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+  "token": "eyJhbGciOiJIUzI1NiIs..."
 }
 ```
 
@@ -117,6 +118,81 @@ Authenticate and get user + JWT.
 | 400    | Please provide email and password |
 | 401    | Invalid email or password         |
 | 500    | Login failed                      |
+
+---
+
+### POST /api/auth/social-login
+
+Links or creates an account using a provider id + email from your mobile SDK (Google / Apple / Facebook / Twitter). The server does **not** verify the OAuth token; the app must obtain `email`, `name`, and stable `socialLoginId` from the provider first, then send them here.
+
+**Body (JSON)**
+
+| Field | Type | Required | Notes |
+|-------|------|----------|--------|
+| `email` | string | Yes | Normalised to lowercase |
+| `name` | string | Yes | Display name |
+| `socialLoginProvider` | string | Yes | One of: `google`, `apple`, `facebook`, `twitter`, `x` |
+| `socialLoginId` | string | Yes | Stable id from the provider (subject / user id) |
+| `profilePicture` | string | No | URL string; stored as `avatar` if avatar is empty |
+
+**Success** `200 OK`
+
+```json
+{
+  "user": {
+    "_id": "...",
+    "email": "user@example.com",
+    "name": "Jane",
+    "avatar": "https://...",
+    "createdAt": "..."
+  },
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+  "token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+---
+
+### POST /api/auth/forgot-password
+
+Placeholder flow (no email). Same response for every request so email existence is not revealed.
+
+**Body**
+
+| Field   | Type   | Required |
+|---------|--------|----------|
+| `email` | string | Yes      |
+
+**Success** `200 OK`
+
+```json
+{
+  "message": "If this email is registered, you can reset your password using the reset code."
+}
+```
+
+---
+
+### POST /api/auth/reset-password
+
+Set a new password using registered **email** + fixed **code** (default `1234`).
+
+**Body**
+
+| Field      | Type   | Required | Notes |
+|------------|--------|----------|-------|
+| `email`    | string | Yes      | Account email |
+| `code`     | string / number | Yes | Must match `PASSWORD_RESET_CODE` (default `1234`) |
+| `password` | string | Yes      | New password, min 6 characters |
+
+**Success** `200 OK`
+
+```json
+{
+  "message": "Password has been reset"
+}
+```
 
 ---
 
