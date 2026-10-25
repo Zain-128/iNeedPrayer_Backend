@@ -11,10 +11,10 @@
   "module": "ESNext",
   "type": "module",
   "scripts": {
-    "build": "node api.js && tsc",
+    "build": "tsc",
     "postinstall": "npm run build",
-    "start": "node api.js && node dist/server.js",
-    "dev": "node api.js && tsx watch server.ts",
+    "start": "node dist/server.js",
+    "dev": "tsx watch server.ts",
     "seed:admin": "tsx src/seed/seedAdminUser.ts",
     "typecheck": "tsc --noEmit"
   },
