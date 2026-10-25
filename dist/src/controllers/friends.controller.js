@@ -1,6 +1,5 @@
 import mongoose from "mongoose";
 import * as friendsService from "../services/friends.service.js";
-import * as groupsService from "../services/groups.service.js";
 import { paramStr } from "../utils/routeParams.js";
 function parseTargetUserId(body) {
     const userId = body?.userId;
@@ -64,18 +63,6 @@ export const listIncomingRequests = async (req, res) => {
             return res.status(401).json({ message: "Unauthorized" });
         const requests = await friendsService.listIncomingFriendRequests(req.userId);
         return res.json({ requests });
-    }
-    catch (err) {
-        return handleError(res, err);
-    }
-};
-/** GET /api/friends/group-invitations/incoming — pending group invites for the current user. */
-export const listIncomingGroupInvitations = async (req, res) => {
-    try {
-        if (!req.userId)
-            return res.status(401).json({ message: "Unauthorized" });
-        const result = await groupsService.listIncomingGroupInvites(req.userId);
-        return res.json(result);
     }
     catch (err) {
         return handleError(res, err);

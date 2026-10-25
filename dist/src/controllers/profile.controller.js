@@ -50,7 +50,7 @@ export const uploadAvatar = async (req, res) => {
         return res.status(201).json({ url: saved.url, profile });
     }
     catch (err) {
-        console.error("uploadAvatar", err);
+        console.error("uploadAvatar error:", err);
         return res.status(400).json({
             success: false,
             message: err.message || "Could not upload profile image",
@@ -75,7 +75,7 @@ export const uploadCover = async (req, res) => {
         return res.status(201).json({ url: saved.url, profile });
     }
     catch (err) {
-        console.error("uploadCover", err);
+        console.error("uploadCover error:", err);
         return res.status(400).json({
             success: false,
             message: err.message || "Could not upload cover image",

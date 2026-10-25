@@ -22,6 +22,7 @@ const userSchema = new mongoose.Schema({
     avatar: { type: String, default: "" },
     coverImage: { type: String, default: "" },
     bio: { type: String, default: "", maxlength: 500 },
+    // null = never chosen, so the app can keep its device-detected language
     preferredLanguage: { type: String, default: null },
     city: { type: String, default: "" },
     state: { type: String, default: "" },
@@ -54,12 +55,6 @@ const userSchema = new mongoose.Schema({
     passwordResetRequestedAt: { type: Date, default: null, select: false },
     passwordResetAttempts: { type: Number, default: 0, select: false },
 }, { timestamps: true });
-userSchema.index({ socialLoginProvider: 1, socialLoginId: 1 }, {
-    unique: true,
-    partialFilterExpression: {
-        socialLoginId: { $exists: true, $type: "string", $ne: "" },
-    },
-});
 userSchema.index({ deletedAt: 1 });
 userSchema.virtual("locationLabel").get(function () {
     const parts = [this.city, this.state, this.country].filter(Boolean);

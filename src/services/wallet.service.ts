@@ -432,7 +432,7 @@ export async function requestWithdrawal(opts: {
   );
   if (!updated) throw httpError("Insufficient withdrawable balance", 400);
 
-  const withdrawal = await Withdrawal.create({
+  const withdrawal: any = await Withdrawal.create({
     user: userId,
     name: user?.name ?? meta.name,
     email: user?.email ?? "",

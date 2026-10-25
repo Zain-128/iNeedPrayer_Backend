@@ -3,21 +3,150 @@ import { Group } from "../models/group.model.js";
 import { GroupMember } from "../models/groupMember.model.js";
 import { GroupInvite } from "../models/groupInvite.model.js";
 import { GroupJoinRequest } from "../models/groupJoinRequest.model.js";
+import { GroupNotificationSettings, } from "../models/groupNotificationSettings.model.js";
+import { GroupMemberNotificationPreferences, } from "../models/groupMemberNotificationPreferences.model.js";
 import { GroupMute } from "../models/groupMute.model.js";
 import { Conversation } from "../models/conversation.model.js";
 import { User } from "../models/user.model.js";
 import { FriendRequest } from "../models/friendRequest.model.js";
+import { UserBlock } from "../models/userBlock.model.js";
+import { UserSubscription } from "../models/userSubscription.model.js";
+import { Post } from "../models/post.model.js";
+import { Comment } from "../models/comment.model.js";
+import { PostReaction } from "../models/postReaction.model.js";
+import { Donation } from "../models/donation.model.js";
+import { LiveStreamSession } from "../models/liveStreamSession.model.js";
+import { LiveStreamComment } from "../models/liveStreamComment.model.js";
 import * as postsService from "./posts.service.js";
 import { createNotification, notifyMany } from "./notifications.service.js";
-import { formatCountLabel, normalizeMediaUrl } from "../utils/mappers.js";
+import { formatCountLabel } from "../utils/mappers.js";
 import { normalizeGroupInput, validateCreateGroupInput, } from "../utils/groupInput.js";
+function httpError(message, statusCode) {
+    const err = new Error(message);
+    err.statusCode = statusCode;
+    return err;
+}
+export async function syncGroupMemberCount(groupId) {
+    const count = await GroupMember.countDocuments({ group: groupId });
+    await Group.findByIdAndUpdate(groupId, { memberCount: count });
+    return count;
+}
+export async function getGroupStaffLimits(groupId, groupDoc) {
+    const g = groupDoc || (await Group.findById(groupId).lean());
+    if (!g)
+        throw httpError("Group not found", 404);
+    let tier = g.subscriptionTier === "Premium" ? "Premium" : "Standard";
+    if (g.createdBy) {
+        const ownerSub = await UserSubscription.findOne({
+            user: g.createdBy,
+            status: "Active",
+        })
+            .populate("plan")
+            .lean();
+        if (ownerSub) {
+            const planName = (ownerSub.planName ||
+                ownerSub.plan?.name ||
+                "").toLowerCase();
+            if (planName.includes("premium")) {
+                tier = "Premium";
+            }
+        }
+    }
+    const maxStaff = tier === "Premium" ? 5 : 2;
+    const [adminCount, editorCount] = await Promise.all([
+        GroupMember.countDocuments({ group: groupId, role: "admin" }),
+        GroupMember.countDocuments({
+            group: groupId,
+            role: { $in: ["editor", "moderator"] },
+        }),
+    ]);
+    const currentStaff = adminCount + editorCount;
+    const canAddStaff = currentStaff < maxStaff;
+    return {
+        tier,
+        plan: tier,
+        maxStaff,
+        currentStaff,
+        adminCount,
+        editorCount,
+        ownerCount: 1,
+        canAddStaff,
+        availableStaffSlots: Math.max(0, maxStaff - currentStaff),
+    };
+}
+export async function getUserGroupPermissions(groupId, userId) {
+    if (!userId) {
+        return {
+            role: null,
+            isOwner: false,
+            isAdmin: false,
+            isEditor: false,
+            isMember: false,
+            canEditCommunity: false,
+            canEditGroup: false,
+            canChangePrivacy: false,
+            canManageAdmins: false,
+            canManageEditors: false,
+            canRemoveMembers: false,
+            canManageJoinRequests: false,
+            canManagePosts: false,
+            canManageCommunityNotifications: false,
+            canAccessAnalytics: false,
+            canManageWallet: false,
+            canManageWithdrawals: false,
+            canGoLive: false,
+            canDeleteCommunity: false,
+            canDeleteGroup: false,
+        };
+    }
+    const group = await Group.findById(groupId).lean();
+    if (!group)
+        throw httpError("Group not found", 404);
+    const isOwner = group.createdBy?.toString() === userId;
+    let role = isOwner ? "owner" : "member";
+    let isMember = isOwner;
+    const memberDoc = await GroupMember.findOne({
+        group: groupId,
+        user: userId,
+    }).lean();
+    if (memberDoc) {
+        isMember = true;
+        if (!isOwner) {
+            role = memberDoc.role || "member";
+        }
+    }
+    const isAdmin = isOwner || role === "admin";
+    const isEditor = role === "editor" || role === "moderator";
+    return {
+        role,
+        isOwner,
+        isAdmin: role === "admin",
+        isEditor,
+        isMember,
+        canEditCommunity: isOwner || isAdmin,
+        canEditGroup: isOwner || isAdmin,
+        canChangePrivacy: isOwner,
+        canManageAdmins: isOwner,
+        canManageEditors: isOwner,
+        canRemoveMembers: isOwner || isAdmin,
+        canManageJoinRequests: isOwner || isAdmin,
+        canManagePosts: isOwner || isAdmin || isEditor,
+        canManageCommunityNotifications: isOwner || isAdmin,
+        canAccessAnalytics: isOwner || isAdmin,
+        canManageWallet: isOwner || isAdmin,
+        canManageWithdrawals: isOwner,
+        canGoLive: isOwner || isAdmin,
+        canDeleteCommunity: isOwner,
+        canDeleteGroup: isOwner,
+    };
+}
 function mapGroup(g, userId, memberSet, createdByMeSet) {
     const id = g._id.toString();
     const isJoined = userId && memberSet ? memberSet.has(id) : false;
     const isMyGroup = userId && createdByMeSet
         ? createdByMeSet.has(id)
         : g.createdBy?.toString() === userId;
-    const banner = g.bannerImage || g.image || "";
+    const banner = g.bannerImage ?? g.image ?? "";
     const image = g.image ?? "";
     return {
         id,
@@ -32,6 +161,9 @@ function mapGroup(g, userId, memberSet, createdByMeSet) {
         isMyGroup: !!isMyGroup,
         isJoined,
         isMember: isJoined,
+        privacy: g.privacy || "Public",
+        requiresApproval: !!g.requiresApproval || g.privacy === "Private",
+        subscriptionTier: g.subscriptionTier || "Standard",
         createdBy: g.createdBy?.toString() ?? null,
     };
 }
@@ -48,11 +180,6 @@ async function loadGroupContext(userId) {
     createdByMeSet = new Set(owned.map((g) => g._id.toString()));
     return { memberSet, createdByMeSet };
 }
-function httpError(message, statusCode) {
-    const err = new Error(message);
-    err.statusCode = statusCode;
-    return err;
-}
 async function assertGroupMember(groupId, userId) {
     const group = await Group.findById(groupId);
     if (!group)
@@ -66,9 +193,7 @@ async function assertGroupMember(groupId, userId) {
 async function assertGroupManager(groupId, userId) {
     const group = await Group.findById(groupId);
     if (!group) {
-        const err = new Error("Group not found");
-        err.statusCode = 404;
-        throw err;
+        throw httpError("Group not found", 404);
     }
     const doc = group;
     if (group.createdBy?.toString() === userId) {
@@ -80,9 +205,7 @@ async function assertGroupManager(groupId, userId) {
         role: { $in: ["owner", "admin"] },
     });
     if (!member) {
-        const err = new Error("Not allowed");
-        err.statusCode = 403;
-        throw err;
+        throw httpError("Not allowed", 403);
     }
     return { group: doc };
 }
@@ -100,60 +223,65 @@ function applyGroupInput(group, input, partial = false) {
 }
 export async function listGroups(opts) {
     const q = opts.q?.trim();
-    const rx = q
-        ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
-        : null;
-    const filter = rx
-        ? { $or: [{ name: rx }, { description: rx }] }
-        : {};
-    // Public lists hide suspended groups; "my" / "joined" still include them for owners/members
-    const tab = opts.tab ?? (opts.mine ? "my" : undefined);
-    if (tab !== "my" && tab !== "joined") {
-        filter.status = "Active";
+    const filter = {
+        status: { $in: ["Active", "Pending"] },
+    };
+    if (q) {
+        filter.$or = [
+            { name: { $regex: q, $options: "i" } },
+            { description: { $regex: q, $options: "i" } },
+        ];
     }
-    let docs = await Group.find(filter).sort({ memberCount: -1 }).limit(100).lean();
     const { memberSet, createdByMeSet } = await loadGroupContext(opts.userId);
-    if (opts.userId && tab === "joined") {
-        docs = docs.filter((d) => memberSet.has(d._id.toString()));
+    if (opts.mine || opts.tab === "my") {
+        if (!opts.userId)
+            return [];
+        filter.createdBy = opts.userId;
     }
-    if (opts.userId && tab === "my") {
-        docs = docs.filter((d) => createdByMeSet.has(d._id.toString()));
+    else if (opts.tab === "joined") {
+        if (!opts.userId)
+            return [];
+        filter._id = { $in: [...memberSet] };
     }
-    return docs.map((g) => mapGroup(g, opts.userId, memberSet, createdByMeSet));
+    const groups = await Group.find(filter)
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean();
+    return groups.map((g) => mapGroup(g, opts.userId, memberSet, createdByMeSet));
 }
 export async function discoverGroups(opts) {
     const q = opts.q?.trim();
-    const rx = q
-        ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
-        : null;
     const filter = {
         status: "Active",
-        ...(rx ? { $or: [{ name: rx }, { description: rx }] } : {}),
+        privacy: "Public",
     };
-    let docs = await Group.find(filter).sort({ memberCount: -1 }).limit(100).lean();
-    const { memberSet, createdByMeSet } = await loadGroupContext(opts.userId);
-    if (opts.userId) {
-        docs = docs.filter((d) => !memberSet.has(d._id.toString()));
+    if (q) {
+        filter.$or = [
+            { name: { $regex: q, $options: "i" } },
+            { description: { $regex: q, $options: "i" } },
+        ];
     }
-    return docs.map((g) => mapGroup(g, opts.userId, memberSet, createdByMeSet));
+    const { memberSet, createdByMeSet } = await loadGroupContext(opts.userId);
+    const groups = await Group.find(filter)
+        .sort({ memberCount: -1, createdAt: -1 })
+        .limit(50)
+        .lean();
+    return groups.map((g) => mapGroup(g, opts.userId, memberSet, createdByMeSet));
 }
 export async function getGroup(groupId, userId) {
     const g = await Group.findById(groupId).lean();
     if (!g) {
-        const err = new Error("Group not found");
-        err.statusCode = 404;
-        throw err;
+        throw httpError("Group not found", 404);
     }
     const { memberSet, createdByMeSet } = await loadGroupContext(userId);
-    const isMemberOrOwner = !!userId &&
-        (memberSet.has(groupId) || createdByMeSet.has(groupId));
+    const isMemberOrOwner = !!userId && (memberSet.has(groupId) || createdByMeSet.has(groupId));
     if (g.status === "Suspended" && !isMemberOrOwner) {
-        const err = new Error("Group not found");
-        err.statusCode = 404;
-        throw err;
+        throw httpError("Group not found", 404);
     }
     const mapped = mapGroup(g, userId, memberSet, createdByMeSet);
     let myRole = null;
+    let hasRequestedJoin = false;
+    let hasPendingInvite = false;
     if (userId) {
         if (g.createdBy?.toString() === userId) {
             myRole = "owner";
@@ -161,28 +289,46 @@ export async function getGroup(groupId, userId) {
         else {
             const m = await GroupMember.findOne({ user: userId, group: groupId }).lean();
             myRole = m?.role ?? null;
+            if (!myRole) {
+                const [reqDoc, invDoc] = await Promise.all([
+                    GroupJoinRequest.exists({ group: groupId, user: userId, status: "pending" }),
+                    GroupInvite.exists({ group: groupId, user: userId, status: "pending" }),
+                ]);
+                hasRequestedJoin = !!reqDoc;
+                hasPendingInvite = !!invDoc;
+            }
         }
     }
+    const [permissions, limits] = await Promise.all([
+        getUserGroupPermissions(groupId, userId),
+        getGroupStaffLimits(groupId, g),
+    ]);
     return {
         ...mapped,
         myRole,
         isCreatorOrAdmin: myRole === "owner" || myRole === "admin",
+        hasRequestedJoin,
+        hasPendingInvite,
+        permissions,
+        limits,
     };
 }
 export async function createGroup(userId, body) {
     const input = normalizeGroupInput(body);
     const validationError = validateCreateGroupInput(input);
     if (validationError) {
-        const err = new Error(validationError);
-        err.statusCode = 400;
-        throw err;
+        throw httpError(validationError, 400);
     }
+    const privacy = input.privacy || "Public";
     const g = await Group.create({
         name: input.name,
         image: input.image,
         bannerImage: input.bannerImage || input.image || "",
         description: input.description,
         createdBy: userId,
+        privacy,
+        requiresApproval: privacy === "Private",
+        subscriptionTier: "Standard",
         memberCount: 1,
     });
     await GroupMember.create({ user: userId, group: g._id, role: "owner" });
@@ -190,58 +336,77 @@ export async function createGroup(userId, body) {
     void ensureEntityWallet("group", g._id.toString());
     const { recordAdminActivity } = await import("./admin/adminActivity.service.js");
     void recordAdminActivity({
-        type: "group_created",
+        type: "community_created",
         title: "New group created",
-        message: g.name,
-        refType: "group",
-        refId: g._id.toString(),
         actorId: userId,
+        refId: g._id.toString(),
+        refType: "group",
+        meta: { name: g.name },
     });
     return getGroup(g._id.toString(), userId);
 }
 export async function updateGroup(groupId, userId, body) {
     const { group } = await assertGroupManager(groupId, userId);
+    const isOwner = group.createdBy?.toString() === userId;
     const input = normalizeGroupInput(body);
     if (!input.name && body?.name === "") {
-        const err = new Error("Group name is required");
-        err.statusCode = 400;
-        throw err;
+        throw httpError("Group name is required", 400);
     }
     applyGroupInput(group, input, true);
     if (input.name)
         group.name = input.name;
-    await group.save();
-    await Conversation.updateOne(
-        { memberKey: `grp:${groupId}` },
-        {
-            $set: {
-                ...(input.name ? { title: `${input.name} Chat` } : {}),
-                ...(input.image !== undefined ? { image: input.image } : {}),
-                ...(input.description !== undefined ? { description: input.description } : {}),
-                ...(input.privacy ? { privacy: input.privacy === "Private" ? "private" : "public" } : {}),
-            },
+    // Only Owner can change privacy
+    if (input.privacy !== undefined) {
+        if (!isOwner) {
+            throw httpError("Only the community owner can change privacy settings", 403);
         }
-    ).catch(() => {});
+        group.privacy = input.privacy;
+        group.requiresApproval = input.privacy === "Private";
+    }
+    await group.save();
+    await Conversation.updateOne({ memberKey: `grp:${groupId}` }, {
+        $set: {
+            ...(input.name ? { title: `${input.name} Chat` } : {}),
+            ...(input.image !== undefined ? { image: input.image } : {}),
+            ...(input.description !== undefined
+                ? { description: input.description }
+                : {}),
+            ...(input.privacy
+                ? { privacy: input.privacy === "Private" ? "private" : "public" }
+                : {}),
+        },
+    }).catch(() => { });
     return getGroup(groupId, userId);
+}
+export async function updateGroupPrivacy(groupId, actorId, privacy) {
+    const group = await Group.findById(groupId);
+    if (!group)
+        throw httpError("Group not found", 404);
+    if (group.createdBy?.toString() !== actorId) {
+        throw httpError("Only the community owner can change privacy settings", 403);
+    }
+    group.privacy = privacy;
+    group.requiresApproval = privacy === "Private";
+    await group.save();
+    await Conversation.updateOne({ memberKey: `grp:${groupId}` }, { $set: { privacy: privacy === "Private" ? "private" : "public" } }).catch(() => { });
+    return getGroup(groupId, actorId);
 }
 export async function deleteGroup(groupId, userId) {
     const group = await Group.findById(groupId);
     if (!group) {
-        const err = new Error("Group not found");
-        err.statusCode = 404;
-        throw err;
+        throw httpError("Group not found", 404);
     }
     if (group.createdBy?.toString() !== userId) {
-        const err = new Error("Only the group owner can delete");
-        err.statusCode = 403;
-        throw err;
+        throw httpError("Only the creator can delete this group", 403);
     }
     await Promise.all([
         GroupMember.deleteMany({ group: groupId }),
         GroupInvite.deleteMany({ group: groupId }),
         GroupJoinRequest.deleteMany({ group: groupId }),
         GroupMute.deleteMany({ group: groupId }),
-        Conversation.deleteOne({ memberKey: `grp:${groupId}` }).catch(() => {}),
+        GroupNotificationSettings.deleteOne({ group: groupId }),
+        GroupMemberNotificationPreferences.deleteMany({ group: groupId }),
+        Conversation.deleteOne({ memberKey: `grp:${groupId}` }).catch(() => { }),
         group.deleteOne(),
     ]);
     return { ok: true };
@@ -263,12 +428,9 @@ async function addGroupMemberDirect(groupId, userId) {
         await pendingInvite.save();
     }
     await GroupMember.create({ user: userId, group: groupId, role: "member" });
-    g.memberCount += 1;
-    await g.save();
-    await Conversation.updateOne(
-        { memberKey: `grp:${groupId}` },
-        { $addToSet: { members: new mongoose.Types.ObjectId(userId) } }
-    ).catch(() => {});
+    const count = await syncGroupMemberCount(groupId);
+    g.memberCount = count;
+    await Conversation.updateOne({ memberKey: `grp:${groupId}` }, { $addToSet: { members: new mongoose.Types.ObjectId(userId) } }).catch(() => { });
     return g;
 }
 export async function joinGroup(userId, groupId) {
@@ -281,17 +443,38 @@ export async function joinGroup(userId, groupId) {
     const ex = await GroupMember.findOne({ user: userId, group: groupId });
     if (ex)
         throw httpError("Already a member", 400);
-    if (g.requiresApproval) {
-        const existing = await GroupJoinRequest.findOne({ group: groupId, user: userId });
+    if (g.privacy === "Private" || g.requiresApproval) {
+        const pendingInvite = await GroupInvite.findOne({
+            group: groupId,
+            user: userId,
+            status: "pending",
+        });
+        if (pendingInvite) {
+            return acceptGroupInvite(groupId, userId, userId);
+        }
+        const existing = await GroupJoinRequest.findOne({
+            group: groupId,
+            user: userId,
+        });
         if (existing?.status === "pending") {
-            return { status: "pending", message: "Join request already pending" };
+            return {
+                status: "pending",
+                isMember: false,
+                hasRequestedJoin: true,
+                message: "Join request already pending approval",
+                memberCount: g.memberCount,
+            };
         }
         if (existing?.status === "rejected") {
             existing.status = "pending";
             await existing.save();
         }
         else if (!existing) {
-            await GroupJoinRequest.create({ group: groupId, user: userId, status: "pending" });
+            await GroupJoinRequest.create({
+                group: groupId,
+                user: userId,
+                status: "pending",
+            });
         }
         const admins = await GroupMember.find({
             group: groupId,
@@ -310,11 +493,22 @@ export async function joinGroup(userId, groupId) {
             refId: groupId,
             category: "groupActivity",
         });
-        return { status: "pending", message: "Join request submitted" };
+        return {
+            status: "pending",
+            isMember: false,
+            hasRequestedJoin: true,
+            message: "Join request submitted. Awaiting approval.",
+            memberCount: g.memberCount,
+        };
     }
     await addGroupMemberDirect(groupId, userId);
     const group = await getGroup(groupId, userId);
-    return { status: "joined", group };
+    return {
+        status: "joined",
+        isMember: true,
+        group,
+        memberCount: group.memberCount,
+    };
 }
 function mapJoinRequest(row) {
     return {
@@ -357,7 +551,8 @@ export async function approveJoinRequest(groupId, actorId, targetUserId) {
         refId: groupId,
         category: "groupActivity",
     });
-    return { ok: true, userId: targetUserId, status: "approved" };
+    const memberCount = await syncGroupMemberCount(groupId);
+    return { ok: true, userId: targetUserId, status: "approved", memberCount };
 }
 export async function rejectJoinRequest(groupId, actorId, targetUserId) {
     await assertGroupManager(groupId, actorId);
@@ -370,181 +565,158 @@ export async function rejectJoinRequest(groupId, actorId, targetUserId) {
         throw httpError("Join request not found", 404);
     request.status = "rejected";
     await request.save();
-    const g = await Group.findById(groupId);
-    await createNotification({
-        userId: targetUserId,
-        title: "Join request declined",
-        body: `Your request to join ${g?.name ?? "the group"} was declined`,
-        kind: "group_join_rejected",
-        refType: "group",
-        refId: groupId,
-        category: "groupActivity",
-    });
     return { ok: true, userId: targetUserId, status: "rejected" };
 }
 export async function leaveGroup(userId, groupId) {
     const g = await Group.findById(groupId);
     if (!g) {
-        const err = new Error("Group not found");
-        err.statusCode = 404;
-        throw err;
+        throw httpError("Group not found", 404);
     }
     if (g.createdBy?.toString() === userId) {
-        const err = new Error("Owner cannot leave; delete the group or transfer ownership first");
-        err.statusCode = 400;
-        throw err;
+        throw httpError("Owner cannot leave the community. Please transfer ownership or delete the community.", 400);
     }
     const ex = await GroupMember.findOne({ user: userId, group: groupId });
     if (!ex) {
-        const err = new Error("Not a member");
-        err.statusCode = 400;
-        throw err;
+        throw httpError("Not a member", 400);
     }
     await ex.deleteOne();
-    g.memberCount = Math.max(0, g.memberCount - 1);
-    await g.save();
-    await Conversation.updateOne(
-        { memberKey: `grp:${groupId}` },
-        {
-            $pull: {
-                members: new mongoose.Types.ObjectId(userId),
-                admins: new mongoose.Types.ObjectId(userId),
-            },
-        }
-    ).catch(() => {});
-    return { ok: true, memberCount: g.memberCount };
+    const count = await syncGroupMemberCount(groupId);
+    await Conversation.updateOne({ memberKey: `grp:${groupId}` }, {
+        $pull: {
+            members: new mongoose.Types.ObjectId(userId),
+            admins: new mongoose.Types.ObjectId(userId),
+        },
+    }).catch(() => { });
+    return { ok: true, isJoined: false, isMember: false, memberCount: count };
 }
 export async function listGroupMembers(groupId, userId) {
     const g = await Group.findById(groupId);
     if (!g) {
-        const err = new Error("Group not found");
-        err.statusCode = 404;
-        throw err;
+        throw httpError("Group not found", 404);
     }
+    const isCreator = g.createdBy?.toString() === userId;
     const membership = await GroupMember.findOne({ user: userId, group: groupId });
-    if (!membership && g.createdBy?.toString() !== userId) {
-        const err = new Error("Not a member of this group");
-        err.statusCode = 403;
-        throw err;
+    if (!membership && !isCreator && g.privacy === "Private") {
+        throw httpError("Not a member of this private group", 403);
     }
     const members = await GroupMember.find({ group: groupId })
         .populate("user", "name email avatar")
         .sort({ role: 1, createdAt: 1 })
         .lean();
-    return members.map((m) => ({
-        id: m._id.toString(),
-        userId: m.user?._id?.toString() ?? "",
-        name: m.user?.name ?? "",
-        email: m.user?.email ?? "",
-        avatar: m.user?.avatar ?? "",
-        role: m.role,
-        joinedAt: m.createdAt,
-    }));
+    const [limits, permissions] = await Promise.all([
+        getGroupStaffLimits(groupId, g),
+        getUserGroupPermissions(groupId, userId),
+    ]);
+    const list = members.map((m) => {
+        const userDoc = m.user;
+        const memberUserId = userDoc?._id?.toString() ?? "";
+        const isOwner = g.createdBy?.toString() === memberUserId;
+        return {
+            id: memberUserId,
+            name: userDoc?.name ?? "",
+            email: userDoc?.email ?? "",
+            avatar: userDoc?.avatar ?? "",
+            role: (isOwner ? "owner" : m.role) || "member",
+            isOwner,
+            joinedAt: m.createdAt,
+        };
+    });
+    return {
+        members: list,
+        limits,
+        permissions,
+        totalMembers: list.length,
+    };
 }
 export async function listInviteCandidates(groupId, actorId, q) {
-    await assertGroupManager(groupId, actorId);
+    const g = await Group.findById(groupId);
+    if (!g)
+        throw httpError("Group not found", 404);
+    const isCreator = g.createdBy?.toString() === actorId;
+    const isMember = isCreator ||
+        (await GroupMember.exists({ group: groupId, user: actorId }));
+    if (!isMember) {
+        throw httpError("You must be a member of this group to invite friends", 403);
+    }
+    // Find accepted friends of actorId
+    const friendRequests = await FriendRequest.find({
+        status: "accepted",
+        $or: [{ from: actorId }, { to: actorId }],
+    })
+        .populate("from", "name email avatar deletedAt")
+        .populate("to", "name email avatar deletedAt")
+        .lean();
+    const blocks = await UserBlock.find({
+        $or: [{ blocker: actorId }, { blocked: actorId }],
+    }).lean();
+    const blockedIds = new Set();
+    for (const b of blocks) {
+        if (b.blocker.toString() === actorId)
+            blockedIds.add(b.blocked.toString());
+        else
+            blockedIds.add(b.blocker.toString());
+    }
     const [existingMembers, pendingInvites] = await Promise.all([
         GroupMember.find({ group: groupId }).select("user").lean(),
-        GroupInvite.find({ group: groupId, status: "pending" }).select("user").lean(),
+        GroupInvite.find({ group: groupId, status: "pending" })
+            .select("user")
+            .lean(),
     ]);
-    const exclude = new Set([
+    const excludeIds = new Set([
         ...existingMembers.map((m) => m.user.toString()),
         ...pendingInvites.map((i) => i.user.toString()),
+        actorId,
+        ...blockedIds,
     ]);
-    exclude.add(actorId);
-    const search = q?.trim();
-    const rx = search
-        ? new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
-        : null;
-    const excludeIds = [...exclude]
-        .filter((id) => mongoose.isValidObjectId(id))
-        .map((id) => new mongoose.Types.ObjectId(id));
-    const userFilter = rx
-        ? { $or: [{ name: rx }, { email: rx }], _id: { $nin: excludeIds } }
-        : { _id: { $nin: excludeIds } };
-    userFilter.deletedAt = null;
-    const users = await User.find(userFilter)
-        .select("name email avatar")
-        .sort({ name: 1 })
-        .limit(50)
-        .lean();
-    if (!users.length)
-        return [];
-    const userIds = users.map((u) => u._id);
-    const friendCounts = await FriendRequest.aggregate([
-        {
-            $match: {
-                status: "accepted",
-                $or: [
-                    { from: { $in: userIds } },
-                    { to: { $in: userIds } },
-                ],
-            },
-        },
-        {
-            $project: {
-                userA: "$from",
-                userB: "$to",
-            },
-        },
-        {
-            $facet: {
-                fromCounts: [
-                    { $group: { _id: "$userA", count: { $sum: 1 } } },
-                ],
-                toCounts: [
-                    { $group: { _id: "$userB", count: { $sum: 1 } } },
-                ],
-            },
-        },
-    ]);
-    const countMap = new Map();
-    const facet = friendCounts[0];
-    if (facet) {
-        for (const row of facet.fromCounts) {
-            const id = row._id.toString();
-            countMap.set(id, (countMap.get(id) ?? 0) + row.count);
+    const search = q?.trim().toLowerCase();
+    const candidates = [];
+    for (const fr of friendRequests) {
+        const friendObj = fr.from._id.toString() === actorId
+            ? fr.to
+            : fr.from;
+        if (!friendObj || friendObj.deletedAt)
+            continue;
+        const friendId = friendObj._id.toString();
+        if (excludeIds.has(friendId))
+            continue;
+        if (search) {
+            const name = (friendObj.name || "").toLowerCase();
+            const email = (friendObj.email || "").toLowerCase();
+            if (!name.includes(search) && !email.includes(search)) {
+                continue;
+            }
         }
-        for (const row of facet.toCounts) {
-            const id = row._id.toString();
-            countMap.set(id, (countMap.get(id) ?? 0) + row.count);
-        }
+        candidates.push({
+            id: friendId,
+            name: friendObj.name || "",
+            email: friendObj.email || "",
+            avatar: friendObj.avatar || "",
+        });
     }
-    return users.map((u) => ({
-        id: u._id.toString(),
-        name: u.name,
-        avatar: u.avatar ?? "",
-        email: u.email,
-        friendCount: countMap.get(u._id.toString()) ?? 0,
-    }));
+    candidates.sort((a, b) => a.name.localeCompare(b.name));
+    return candidates;
 }
 export async function inviteToGroup(inviterId, groupId, opts) {
     const g = await Group.findById(groupId);
     if (!g) {
-        const err = new Error("Group not found");
-        err.statusCode = 404;
-        throw err;
+        throw httpError("Group not found", 404);
     }
-    const inviterMember = await GroupMember.findOne({
-        user: inviterId,
-        group: groupId,
-        role: { $in: ["owner", "admin"] },
-    });
-    if (!inviterMember && g.createdBy?.toString() !== inviterId) {
-        const err = new Error("Not allowed to invite");
-        err.statusCode = 403;
-        throw err;
+    const isCreator = g.createdBy?.toString() === inviterId;
+    const isMember = isCreator ||
+        (await GroupMember.exists({ group: groupId, user: inviterId }));
+    if (!isMember) {
+        throw httpError("Not allowed to invite to this group", 403);
     }
     const targetIds = new Set();
     for (const uid of opts.userIds ?? []) {
         if (mongoose.isValidObjectId(uid))
-            targetIds.add(uid);
+            targetIds.add(String(uid));
     }
     for (const email of opts.emails ?? []) {
         const trimmed = email.trim().toLowerCase();
         if (!trimmed)
             continue;
-        const u = await User.findOne({ email: trimmed });
+        const u = await User.findOne({ email: trimmed }).lean();
         if (u)
             targetIds.add(u._id.toString());
     }
@@ -552,14 +724,20 @@ export async function inviteToGroup(inviterId, groupId, opts) {
     for (const uid of targetIds) {
         if (uid === inviterId)
             continue;
-        const isMember = await GroupMember.findOne({ user: uid, group: groupId });
-        if (isMember)
+        const isAlreadyMember = await GroupMember.exists({
+            user: uid,
+            group: groupId,
+        });
+        if (isAlreadyMember)
             continue;
-        const existingInvite = await GroupInvite.findOne({ user: uid, group: groupId });
-        if (existingInvite?.status === "pending")
+        const existingInvite = await GroupInvite.findOne({
+            user: uid,
+            group: groupId,
+        });
+        if (existingInvite?.status === "pending" ||
+            existingInvite?.status === "accepted") {
             continue;
-        if (existingInvite?.status === "accepted")
-            continue;
+        }
         if (existingInvite) {
             existingInvite.status = "pending";
             existingInvite.invitedBy = new mongoose.Types.ObjectId(inviterId);
@@ -586,6 +764,7 @@ export async function inviteToGroup(inviterId, groupId, opts) {
         });
     }
     return {
+        success: true,
         invited,
         memberCount: g.memberCount,
         membersLabel: formatCountLabel(g.memberCount, "members"),
@@ -610,13 +789,10 @@ function mapGroupInvite(inv) {
     return {
         id: inv._id.toString(),
         user,
-        userId: user?.id ?? "",
-        name: user?.name ?? "",
-        email: user?.email ?? "",
-        avatar: user?.avatar ?? "",
         status: inv.status,
         invitedBy: {
-            id: inv.invitedBy?._id?.toString() ?? "",
+            id: inv.invitedBy?._id?.toString() ??
+                "",
             name: inv.invitedBy?.name ?? "",
             avatar: inv.invitedBy?.avatar ?? "",
         },
@@ -659,17 +835,6 @@ async function findGroupInvite(groupId, targetUserId) {
         throw httpError("Invite not found", 404);
     return invite;
 }
-async function fulfillGroupInvite(groupId, userId) {
-    const g = await Group.findById(groupId);
-    if (!g)
-        throw httpError("Group not found", 404);
-    const existing = await GroupMember.findOne({ user: userId, group: groupId });
-    if (existing)
-        throw httpError("Already a member", 400);
-    await GroupMember.create({ user: userId, group: groupId, role: "member" });
-    g.memberCount += 1;
-    await g.save();
-}
 export async function cancelGroupInvite(groupId, actorId, targetUserId) {
     await assertGroupManager(groupId, actorId);
     const invite = await findGroupInvite(groupId, targetUserId);
@@ -685,15 +850,12 @@ export async function resendGroupInvite(groupId, actorId, targetUserId) {
     if (!g)
         throw httpError("Group not found", 404);
     const invite = await findGroupInvite(groupId, targetUserId);
-    const isMember = await GroupMember.findOne({ user: targetUserId, group: groupId });
+    const isMember = await GroupMember.findOne({
+        user: targetUserId,
+        group: groupId,
+    });
     if (isMember)
         throw httpError("User is already a member", 400);
-    if (invite.status === "pending") {
-        throw httpError("Invite is already pending", 400);
-    }
-    if (invite.status === "accepted") {
-        throw httpError("Invite already accepted", 400);
-    }
     invite.status = "pending";
     invite.invitedBy = new mongoose.Types.ObjectId(actorId);
     await invite.save();
@@ -709,91 +871,65 @@ export async function resendGroupInvite(groupId, actorId, targetUserId) {
     return { invite: mapGroupInvite(invite.toObject()) };
 }
 export async function acceptGroupInvite(groupId, actorId, targetUserId) {
-    if (actorId !== targetUserId) {
+    const uid = targetUserId || actorId;
+    if (actorId !== uid) {
         throw httpError("You can only accept your own invite", 403);
     }
-    const invite = await findGroupInvite(groupId, targetUserId);
+    const g = await Group.findById(groupId);
+    if (!g)
+        throw httpError("Group not found", 404);
+    const invite = await findGroupInvite(groupId, uid);
     if (invite.status === "accepted") {
         throw httpError("Invite already accepted", 400);
     }
-    if (invite.status === "rejected") {
-        throw httpError("Invite was rejected", 400);
+    const existing = await GroupMember.findOne({ user: uid, group: groupId });
+    if (!existing) {
+        await GroupMember.create({ user: uid, group: groupId, role: "member" });
     }
-    await fulfillGroupInvite(groupId, targetUserId);
     invite.status = "accepted";
     await invite.save();
+    const count = await syncGroupMemberCount(groupId);
+    await Conversation.updateOne({ memberKey: `grp:${groupId}` }, { $addToSet: { members: new mongoose.Types.ObjectId(uid) } }).catch(() => { });
+    if (invite.invitedBy) {
+        const inviterUserId = invite.invitedBy?._id
+            ? invite.invitedBy._id.toString()
+            : invite.invitedBy.toString();
+        await createNotification({
+            userId: inviterUserId,
+            actorId: uid,
+            title: "Invitation Accepted",
+            body: `Someone accepted your invitation to join ${g.name}`,
+            kind: "group_invite_accepted",
+            refType: "group",
+            refId: groupId,
+            category: "groupActivity",
+        }).catch(() => { });
+    }
     const group = await getGroup(groupId, actorId);
-    return { group, invite: mapGroupInvite(invite.toObject()) };
+    return { ok: true, isJoined: true, memberCount: count, group };
 }
 export async function rejectGroupInvite(groupId, actorId, targetUserId) {
-    if (actorId !== targetUserId) {
+    const uid = targetUserId || actorId;
+    if (actorId !== uid) {
         throw httpError("You can only reject your own invite", 403);
     }
-    const invite = await findGroupInvite(groupId, targetUserId);
-    if (invite.status === "accepted") {
-        throw httpError("Invite already accepted", 400);
-    }
-    if (invite.status === "rejected") {
-        throw httpError("Invite already rejected", 400);
-    }
+    const invite = await findGroupInvite(groupId, uid);
     invite.status = "rejected";
     await invite.save();
-    return { invite: mapGroupInvite(invite.toObject()) };
-}
-/**
- * Pending invites the user has received from different groups (Network → Group Invites).
- * Skips invites whose group is gone/not active or that the user has already joined.
- */
-export async function listIncomingGroupInvites(userId) {
-    const invites = await GroupInvite.find({ user: userId, status: "pending" })
-        .populate("group", "name image memberCount privacy category status")
-        .populate("invitedBy", "name avatar deletedAt")
-        .sort({ updatedAt: -1 })
-        .lean();
-    const live = invites.filter((inv) => {
-        const g = inv.group;
-        return g != null && (g.status ?? "Active") === "Active";
-    });
-    // Stale invites: user already joined the group by another route.
-    const memberships = await GroupMember.find({
-        user: userId,
-        group: { $in: live.map((inv) => inv.group._id) },
-    })
-        .select("group")
-        .lean();
-    const joined = new Set(memberships.map((m) => m.group.toString()));
-    const invitations = live
-        .filter((inv) => !joined.has(inv.group._id.toString()))
-        .map((inv) => {
-        const g = inv.group;
-        const by = inv.invitedBy;
-        const inviterGone = !by || by.deletedAt;
-        return {
-            id: inv._id.toString(),
-            group: {
-                id: g._id.toString(),
-                name: g.name,
-                image: normalizeMediaUrl(g.image ?? ""),
-                memberCount: g.memberCount ?? 0,
-                privacy: g.privacy ?? "Public",
-                category: g.category ?? "",
-            },
-            invitedBy: inviterGone
-                ? null
-                : {
-                    id: by._id.toString(),
-                    name: by.name,
-                    avatar: normalizeMediaUrl(by.avatar ?? ""),
-                },
-            status: inv.status,
-            // updatedAt moves forward when an admin resends the invite.
-            invitedAt: (inv.updatedAt ?? inv.createdAt),
-        };
-    });
-    return { invitations, pendingCount: invitations.length };
+    return { ok: true, message: "Invitation declined" };
 }
 export async function listGroupPosts(groupId, userId, opts) {
-    await assertGroupMember(groupId, userId);
+    const g = await Group.findById(groupId);
+    if (!g)
+        throw httpError("Group not found", 404);
+    if (g.privacy === "Private") {
+        const isCreator = g.createdBy?.toString() === userId;
+        const isMember = isCreator ||
+            (await GroupMember.exists({ group: groupId, user: userId }));
+        if (!isMember) {
+            throw httpError("Membership required to access private community content", 403);
+        }
+    }
     return postsService.listPosts({
         viewerId: userId,
         groupId,
@@ -816,19 +952,25 @@ export async function listGroupAdmins(groupId, userId) {
         .sort({ role: 1, createdAt: 1 })
         .lean();
     return admins.map((m) => ({
-        id: m._id.toString(),
-        userId: m.user?._id?.toString() ?? "",
+        id: m.user?._id?.toString() ?? "",
         name: m.user?.name ?? "",
         email: m.user?.email ?? "",
         avatar: m.user?.avatar ?? "",
         role: m.role,
-        isOwner: g.createdBy?.toString() === m.user?._id?.toString(),
+        isOwner: g.createdBy?.toString() ===
+            m.user?._id?.toString(),
     }));
 }
 export async function makeGroupAdmin(groupId, actorId, targetUserId) {
     return updateGroupMemberRole(groupId, actorId, targetUserId, "admin");
 }
 export async function removeGroupAdmin(groupId, actorId, targetUserId) {
+    return updateGroupMemberRole(groupId, actorId, targetUserId, "member");
+}
+export async function assignGroupEditor(groupId, actorId, targetUserId) {
+    return updateGroupMemberRole(groupId, actorId, targetUserId, "editor");
+}
+export async function removeGroupEditor(groupId, actorId, targetUserId) {
     return updateGroupMemberRole(groupId, actorId, targetUserId, "member");
 }
 export async function muteGroup(groupId, userId) {
@@ -847,34 +989,33 @@ export async function addGroupMember(groupId, actorId, body) {
     if (!targetUserId && body.email?.trim()) {
         const u = await User.findOne({ email: body.email.trim().toLowerCase() });
         if (!u) {
-            const err = new Error("User not found for that email");
-            err.statusCode = 404;
-            throw err;
+            throw httpError("User not found for that email", 404);
         }
         targetUserId = u._id.toString();
     }
     if (!targetUserId || !mongoose.isValidObjectId(targetUserId)) {
-        const err = new Error("userId or email is required");
-        err.statusCode = 400;
-        throw err;
+        throw httpError("userId or email is required", 400);
     }
-    const role = body.role === "admin" || body.role === "member" ? body.role : "member";
+    const role = body.role === "admin" || body.role === "editor" ? body.role : "member";
     const g = await Group.findById(groupId);
     if (!g) {
-        const err = new Error("Group not found");
-        err.statusCode = 404;
-        throw err;
+        throw httpError("Group not found", 404);
     }
     const ex = await GroupMember.findOne({ group: groupId, user: targetUserId });
     if (ex) {
-        const err = new Error("User is already a member");
-        err.statusCode = 400;
-        throw err;
+        throw httpError("User is already a member", 400);
+    }
+    if (role === "admin" || role === "editor") {
+        const limits = await getGroupStaffLimits(groupId, g);
+        if (!limits.canAddStaff) {
+            throw httpError(`Role limit reached for ${limits.tier} plan (maximum ${limits.maxStaff} staff members). Please upgrade or remove existing roles.`, 400);
+        }
     }
     await GroupMember.create({ group: groupId, user: targetUserId, role });
-    g.memberCount += 1;
-    await g.save();
-    const user = await User.findById(targetUserId).select("name email avatar").lean();
+    const count = await syncGroupMemberCount(groupId);
+    const user = await User.findById(targetUserId)
+        .select("name email avatar")
+        .lean();
     return {
         member: {
             userId: targetUserId,
@@ -883,83 +1024,312 @@ export async function addGroupMember(groupId, actorId, body) {
             avatar: user?.avatar ?? "",
             role,
         },
-        memberCount: g.memberCount,
-        membersLabel: formatCountLabel(g.memberCount, "members"),
+        memberCount: count,
+        membersLabel: formatCountLabel(count, "members"),
     };
 }
 export async function removeGroupMember(groupId, actorId, targetUserId) {
-    await assertGroupManager(groupId, actorId);
     const g = await Group.findById(groupId);
     if (!g) {
-        const err = new Error("Group not found");
-        err.statusCode = 404;
-        throw err;
+        throw httpError("Group not found", 404);
     }
     if (g.createdBy?.toString() === targetUserId) {
-        const err = new Error("Cannot remove the group owner");
-        err.statusCode = 400;
-        throw err;
+        throw httpError("The community owner cannot be removed.", 400);
     }
-    const ex = await GroupMember.findOne({ group: groupId, user: targetUserId });
-    if (!ex) {
-        const err = new Error("Member not found");
-        err.statusCode = 404;
-        throw err;
+    const targetMember = await GroupMember.findOne({
+        group: groupId,
+        user: targetUserId,
+    });
+    if (!targetMember) {
+        throw httpError("Member not found", 404);
     }
-    await ex.deleteOne();
-    g.memberCount = Math.max(0, g.memberCount - 1);
-    await g.save();
-    await Conversation.updateOne(
-        { memberKey: `grp:${groupId}` },
-        {
-            $pull: {
-                members: new mongoose.Types.ObjectId(targetUserId),
-                admins: new mongoose.Types.ObjectId(targetUserId),
-            },
+    const isOwner = g.createdBy?.toString() === actorId;
+    if (!isOwner) {
+        const actorMember = await GroupMember.findOne({
+            group: groupId,
+            user: actorId,
+        });
+        if (!actorMember || actorMember.role !== "admin") {
+            throw httpError("Only owner or admin can remove members", 403);
         }
-    ).catch(() => {});
-    return { ok: true, memberCount: g.memberCount };
+        if (["admin", "editor", "moderator"].includes(targetMember.role)) {
+            throw httpError("Admins can only remove regular members. Only the Owner can remove Admins or Editors.", 403);
+        }
+    }
+    await targetMember.deleteOne();
+    const count = await syncGroupMemberCount(groupId);
+    await Conversation.updateOne({ memberKey: `grp:${groupId}` }, {
+        $pull: {
+            members: new mongoose.Types.ObjectId(targetUserId),
+            admins: new mongoose.Types.ObjectId(targetUserId),
+        },
+    }).catch(() => { });
+    await createNotification({
+        userId: targetUserId,
+        title: "Community Membership",
+        body: `You were removed from ${g.name}`,
+        kind: "group_member_removed",
+        refType: "group",
+        refId: groupId,
+        category: "groupActivity",
+    }).catch(() => { });
+    return { ok: true, memberCount: count };
 }
 export async function updateGroupMemberRole(groupId, actorId, targetUserId, role) {
     const g = await Group.findById(groupId);
     if (!g) {
-        const err = new Error("Group not found");
-        err.statusCode = 404;
-        throw err;
+        throw httpError("Group not found", 404);
     }
     if (g.createdBy?.toString() !== actorId) {
-        const err = new Error("Only the group owner can change roles");
-        err.statusCode = 403;
-        throw err;
+        throw httpError("Only the community owner can change member roles", 403);
     }
-    if (targetUserId === actorId) {
-        const err = new Error("Cannot change owner role");
-        err.statusCode = 400;
-        throw err;
+    if (g.createdBy?.toString() === targetUserId) {
+        throw httpError("The community owner role cannot be changed or downgraded", 400);
     }
-    if (role !== "admin" && role !== "member") {
-        const err = new Error("role must be admin or member");
-        err.statusCode = 400;
-        throw err;
+    const normalizedRole = role === "moderator" ? "editor" : role;
+    if (!["admin", "editor", "member"].includes(normalizedRole)) {
+        throw httpError("Role must be admin, editor, or member", 400);
     }
-    const ex = await GroupMember.findOne({ group: groupId, user: targetUserId });
-    if (!ex) {
-        const err = new Error("Member not found");
-        err.statusCode = 404;
-        throw err;
+    const targetMember = await GroupMember.findOne({
+        group: groupId,
+        user: targetUserId,
+    });
+    if (!targetMember) {
+        throw httpError("Member not found", 404);
     }
-    ex.role = role;
-    await ex.save();
-    if (role === "admin") {
-        await Conversation.updateOne(
-            { memberKey: `grp:${groupId}` },
-            { $addToSet: { admins: new mongoose.Types.ObjectId(targetUserId) } }
-        ).catch(() => {});
-    } else {
-        await Conversation.updateOne(
-            { memberKey: `grp:${groupId}` },
-            { $pull: { admins: new mongoose.Types.ObjectId(targetUserId) } }
-        ).catch(() => {});
+    const isPromotingToStaff = ["admin", "editor"].includes(normalizedRole);
+    const wasStaff = ["admin", "editor", "moderator"].includes(targetMember.role);
+    if (isPromotingToStaff && !wasStaff) {
+        const limits = await getGroupStaffLimits(groupId, g);
+        if (!limits.canAddStaff) {
+            throw httpError(`Role limit reached for this community's ${limits.tier} plan (maximum ${limits.maxStaff} Admins and Editors combined). Please upgrade to Premium or remove existing roles to assign new ones.`, 400);
+        }
     }
-    return { ok: true, userId: targetUserId, role };
+    targetMember.role = normalizedRole;
+    await targetMember.save();
+    if (normalizedRole === "admin") {
+        await Conversation.updateOne({ memberKey: `grp:${groupId}` }, { $addToSet: { admins: new mongoose.Types.ObjectId(targetUserId) } }).catch(() => { });
+    }
+    else {
+        await Conversation.updateOne({ memberKey: `grp:${groupId}` }, { $pull: { admins: new mongoose.Types.ObjectId(targetUserId) } }).catch(() => { });
+    }
+    await createNotification({
+        userId: targetUserId,
+        actorId,
+        title: "Community Role Updated",
+        body: `Your role in ${g.name} was updated to ${normalizedRole}`,
+        kind: "group_role_updated",
+        refType: "group",
+        refId: groupId,
+        category: "groupActivity",
+    }).catch(() => { });
+    const limits = await getGroupStaffLimits(groupId, g);
+    return {
+        ok: true,
+        userId: targetUserId,
+        role: normalizedRole,
+        limits,
+        message: `Role updated to ${normalizedRole}`,
+    };
+}
+export async function getCommunityNotificationSettings(groupId, actorId) {
+    const perms = await getUserGroupPermissions(groupId, actorId);
+    if (!perms.canManageCommunityNotifications) {
+        throw httpError("Only owner or admin can view community notification settings", 403);
+    }
+    let settings = await GroupNotificationSettings.findOne({ group: groupId });
+    if (!settings) {
+        settings = await GroupNotificationSettings.create({ group: groupId });
+    }
+    return settings;
+}
+export async function updateCommunityNotificationSettings(groupId, actorId, body) {
+    const perms = await getUserGroupPermissions(groupId, actorId);
+    if (!perms.canManageCommunityNotifications) {
+        throw httpError("Only owner or admin can update community notification settings", 403);
+    }
+    let settings = await GroupNotificationSettings.findOne({ group: groupId });
+    if (!settings) {
+        settings = new GroupNotificationSettings({ group: groupId });
+    }
+    const fields = [
+        "newMemberJoined",
+        "memberLeft",
+        "newJoinRequest",
+        "invitationAccepted",
+        "newCommunityPost",
+        "newPrayerRequest",
+        "newPraisePost",
+        "newComments",
+        "communityLiveStreamStarted",
+        "communityDonationsSupport",
+        "memberReports",
+        "communityAnnouncements",
+    ];
+    for (const f of fields) {
+        if (typeof body[f] === "boolean") {
+            settings[f] = body[f];
+        }
+    }
+    await settings.save();
+    return settings;
+}
+export async function getMyGroupNotificationPreferences(groupId, userId) {
+    let prefs = await GroupMemberNotificationPreferences.findOne({
+        group: groupId,
+        user: userId,
+    });
+    if (!prefs) {
+        prefs = await GroupMemberNotificationPreferences.create({
+            group: groupId,
+            user: userId,
+        });
+    }
+    return prefs;
+}
+export async function updateMyGroupNotificationPreferences(groupId, userId, body) {
+    let prefs = await GroupMemberNotificationPreferences.findOne({
+        group: groupId,
+        user: userId,
+    });
+    if (!prefs) {
+        prefs = new GroupMemberNotificationPreferences({
+            group: groupId,
+            user: userId,
+        });
+    }
+    const fields = [
+        "allNotifications",
+        "newPosts",
+        "prayerPraiseUpdates",
+        "commentsReplies",
+        "liveStreamNotifications",
+        "communityAnnouncements",
+        "muteCommunityNotifications",
+    ];
+    for (const f of fields) {
+        if (typeof body[f] === "boolean") {
+            prefs[f] = body[f];
+        }
+    }
+    if (typeof body.muteCommunity === "boolean" && body.muteCommunityNotifications === undefined) {
+        prefs.muteCommunityNotifications = body.muteCommunity;
+    }
+    await prefs.save();
+    return prefs;
+}
+export async function getGroupAnalytics(groupId, actorId) {
+    const perms = await getUserGroupPermissions(groupId, actorId);
+    if (!perms.canAccessAnalytics) {
+        throw httpError("Not authorized to view community analytics", 403);
+    }
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [totalMembers, newMembers, totalPosts, prayerPosts, praisePosts, groupPosts, donations, liveStreams,] = await Promise.all([
+        GroupMember.countDocuments({ group: groupId }),
+        GroupMember.countDocuments({
+            group: groupId,
+            createdAt: { $gte: thirtyDaysAgo },
+        }),
+        Post.countDocuments({ group: groupId }),
+        Post.countDocuments({
+            group: groupId,
+            $or: [{ mode: "prayer" }, { category: "Prayer" }],
+        }),
+        Post.countDocuments({
+            group: groupId,
+            $or: [{ mode: "praise" }, { category: "Praise" }],
+        }),
+        Post.find({ group: groupId })
+            .select("_id likesCount praysCount praisesCount commentsCount")
+            .lean(),
+        Donation.find({ group: groupId, status: "Completed" }).lean(),
+        LiveStreamSession.find({ groupId }).lean().catch(() => []),
+    ]);
+    const postIds = groupPosts.map((p) => p._id);
+    const [commentDocCount, reactionDocCount] = await Promise.all([
+        Comment.countDocuments({ post: { $in: postIds } }).catch(() => 0),
+        PostReaction.countDocuments({ post: { $in: postIds } }).catch(() => 0),
+    ]);
+    let sumComments = 0;
+    let sumReactions = 0;
+    for (const p of groupPosts) {
+        sumComments += p.commentsCount || 0;
+        sumReactions += (p.likesCount || 0) + (p.praysCount || 0) + (p.praisesCount || 0);
+    }
+    const totalComments = commentDocCount > 0 ? commentDocCount : sumComments;
+    const totalReactions = reactionDocCount > 0 ? reactionDocCount : sumReactions;
+    const postEngagement = totalComments + totalReactions;
+    let totalDonationsCents = 0;
+    for (const d of donations) {
+        totalDonationsCents += d.amountCents || 0;
+    }
+    let totalLiveViewers = 0;
+    for (const ls of liveStreams) {
+        totalLiveViewers += ls.viewersCount || ls.peakViewers || 0;
+    }
+    const liveComments = await LiveStreamComment.countDocuments({
+        sessionId: {
+            $in: liveStreams.map((s) => s.sessionId || s._id),
+        },
+    }).catch(() => 0);
+    return {
+        totalMembers,
+        newMembers,
+        totalPosts,
+        prayerPosts,
+        praisePosts,
+        postEngagement,
+        totalReactions,
+        totalComments,
+        donationsCents: totalDonationsCents,
+        donationsFormatted: `$${(totalDonationsCents / 100).toFixed(2)}`,
+        liveStreamCount: liveStreams.length,
+        liveStreamViewers: totalLiveViewers,
+        liveStreamEngagement: liveComments,
+    };
+}
+export async function getGroupSubscriptionDetails(groupId, actorId) {
+    const g = await Group.findById(groupId).lean();
+    if (!g)
+        throw httpError("Group not found", 404);
+    const limits = await getGroupStaffLimits(groupId, g);
+    let activePlan = null;
+    if (g.createdBy) {
+        activePlan = await UserSubscription.findOne({
+            user: g.createdBy,
+            status: "Active",
+        })
+            .populate("plan")
+            .lean();
+    }
+    return {
+        tier: limits.tier,
+        planName: limits.tier === "Premium" ? "Premium Plan" : "Standard Plan",
+        billingCycle: activePlan?.billing || "Monthly",
+        status: activePlan?.status || "Active",
+        expiryDate: activePlan?.expiryDate || null,
+        limits,
+    };
+}
+export async function getGroupPermissionsAndLimits(groupId, actorId) {
+    const g = await Group.findById(groupId).lean();
+    if (!g)
+        throw httpError("Group not found", 404);
+    const [permissions, limits, subscription] = await Promise.all([
+        getUserGroupPermissions(groupId, actorId),
+        getGroupStaffLimits(groupId, g),
+        getGroupSubscriptionDetails(groupId, actorId),
+    ]);
+    return {
+        role: permissions.role,
+        isOwner: permissions.isOwner,
+        isAdmin: permissions.isAdmin,
+        isEditor: permissions.isEditor,
+        isMember: permissions.isMember,
+        permissions,
+        limits,
+        subscription,
+        memberCount: g.memberCount,
+        privacy: g.privacy || "Public",
+    };
 }

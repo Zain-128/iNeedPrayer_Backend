@@ -4,12 +4,17 @@ import { optionalAuth } from "../middleware/optionalAuth.middleware.js";
 import { placesRateLimiter } from "../middleware/placesRateLimit.middleware.js";
 import * as churchesController from "../controllers/churches.controller.js";
 const router = Router();
+// --- Google Places API (New) Church Finder Routes ---
+// Supports both GET and POST with rate limiting & caching
 router.get("/nearby", placesRateLimiter, optionalAuth, churchesController.getNearbyChurchesFromGoogle);
 router.post("/nearby", placesRateLimiter, optionalAuth, churchesController.getNearbyChurchesFromGoogle);
 router.get("/places/nearby", placesRateLimiter, optionalAuth, churchesController.getNearbyChurchesFromGoogle);
 router.post("/places/nearby", placesRateLimiter, optionalAuth, churchesController.getNearbyChurchesFromGoogle);
+// Google Places Photo Proxy (Keeps API key secure on backend)
 router.get("/places/photo", optionalAuth, churchesController.getGooglePlacePhoto);
+// Google Places Single Place Details
 router.get("/places/:placeId", placesRateLimiter, optionalAuth, churchesController.getGooglePlaceDetails);
+// --- Standard Churches Routes ---
 router.get("/discover", optionalAuth, churchesController.discoverChurches);
 router.get("/", optionalAuth, churchesController.listChurches);
 router.post("/", protect, churchesController.createChurch);

@@ -4,6 +4,7 @@ import { User } from "../models/user.model.js";
 import { JWT_SECRET, JWT_REFRESH_SECRET, JWT_ACCESS_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN, PASSWORD_RESET_CODE, isSmtpConfigured, } from "../contants.js";
 import { queueEmail, sendEmail } from "./email/mailer.js";
 import { passwordChangedEmail, passwordResetCodeEmail } from "./email/templates.js";
+import { getIo } from "../socket/ioSingleton.js";
 const RESET_CODE_TTL_MINUTES = 15;
 /** Minimum gap between two reset emails to the same account. */
 const RESET_RESEND_COOLDOWN_MS = 60 * 1000;
@@ -29,7 +30,6 @@ function mapUser(u) {
         createdAt: u.createdAt,
     };
 }
-import { getIo } from "../socket/ioSingleton.js";
 function emitUserCreated(user) {
     try {
         const io = getIo();
@@ -205,8 +205,11 @@ export const socialLogin = async (input) => {
     const refreshToken = signRefreshToken(user._id.toString());
     return {
         user: {
-            ...mapUser(user),
-            avatar: user.avatar ?? "",
+            _id: user._id.toString(),
+            email: user.email,
+            name: user.name,
+            avatar: user.avatar,
+            createdAt: user.createdAt,
         },
         accessToken,
         refreshToken,

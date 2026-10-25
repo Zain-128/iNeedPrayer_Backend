@@ -3,7 +3,7 @@ import { LiveStreamComment } from "../models/liveStreamComment.model.js";
 
 export type PersistedLiveComment = {
   id: string;
-  _id: string;
+  _id?: string;
   sessionId: string;
   userId: string;
   userName: string;

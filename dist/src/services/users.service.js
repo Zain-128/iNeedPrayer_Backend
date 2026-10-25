@@ -492,19 +492,17 @@ export async function deleteUserAccount(userId) {
     const profileFiles = [];
     if (user.avatar)
         profileFiles.push(user.avatar);
-    if (user.coverImage)
-        profileFiles.push(user.coverImage);
+    if (user.coverPhoto)
+        profileFiles.push(user.coverPhoto);
     // Clean up user's posts media
-    const posts = await Post.find({ author: userId }).select("image images video videos").lean();
+    const posts = await Post.find({ author: userId }).select("images video videoThumbnail").lean();
     for (const p of posts) {
         if (p.images?.length)
             profileFiles.push(...p.images);
         if (p.video)
             profileFiles.push(p.video);
-        if (p.image)
-            profileFiles.push(p.image);
-        if (p.videos?.length)
-            profileFiles.push(...p.videos);
+        if (p.videoThumbnail)
+            profileFiles.push(p.videoThumbnail);
     }
     await deleteLocalMediaFiles(profileFiles);
     // Remove related entity records

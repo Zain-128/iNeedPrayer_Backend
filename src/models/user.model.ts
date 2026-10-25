@@ -15,6 +15,11 @@ export interface IUser {
   followersCount: number;
   followingCount: number;
   postsCount: number;
+  role: "user" | "admin";
+  status: "active" | "inactive" | "blocked";
+  blockedReason: string;
+  blockedAt: Date | null;
+  deletedAt: Date | null;
   socialId?: string | null;
   provider?: string | null;
   socialLoginProvider?: string | null;
@@ -24,6 +29,7 @@ export interface IUser {
   passwordResetRequestedAt?: Date | null;
   passwordResetAttempts?: number;
   createdAt: Date;
+  updatedAt?: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
@@ -58,6 +64,21 @@ const userSchema = new mongoose.Schema<IUser>(
     followersCount: { type: Number, default: 0 },
     followingCount: { type: Number, default: 0 },
     postsCount: { type: Number, default: 0 },
+    role: {
+      type: String,
+      enum: ["user", "admin"],
+      default: "user",
+      index: true,
+    },
+    status: {
+      type: String,
+      enum: ["active", "inactive", "blocked"],
+      default: "active",
+      index: true,
+    },
+    blockedReason: { type: String, default: "" },
+    blockedAt: { type: Date, default: null },
+    deletedAt: { type: Date, default: null },
     socialId: { type: String, default: null },
     provider: { type: String, default: null },
     socialLoginProvider: { type: String, default: null },
@@ -70,6 +91,13 @@ const userSchema = new mongoose.Schema<IUser>(
   },
   { timestamps: true }
 );
+
+userSchema.index({ deletedAt: 1 });
+
+userSchema.virtual("locationLabel").get(function () {
+  const parts = [this.city, this.state, this.country].filter(Boolean);
+  return parts.length ? parts.join(", ") : "";
+});
 
 userSchema.pre("save", async function () {
   if (!this.isModified("password")) return;

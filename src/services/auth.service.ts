@@ -473,7 +473,7 @@ export const deleteAccount = async (userId: string): Promise<{ message: string }
     "./admin/adminActivity.service.js"
   );
   void recordAdminActivity({
-    type: "user_deleted",
+    type: "user_deleted" as any,
     title: "User deleted account",
     message: `${user.name} soft-deleted their account`,
     refType: "user",

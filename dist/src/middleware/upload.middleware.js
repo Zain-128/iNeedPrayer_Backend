@@ -1,7 +1,7 @@
 import multer from "multer";
 const storage = multer.memoryStorage();
-const imageLimits = { fileSize: 10 * 1024 * 1024 };
-const videoLimits = { fileSize: 100 * 1024 * 1024 };
+const imageLimits = { fileSize: 15 * 1024 * 1024 }; // 15MB
+const videoLimits = { fileSize: 100 * 1024 * 1024 }; // 100MB
 const allowedImageTypes = new Set([
     "image/jpeg",
     "image/png",
@@ -47,7 +47,7 @@ const uploadImageMulter = multer({ storage, limits: imageLimits, fileFilter: ima
 const uploadVideoMulter = multer({ storage, limits: videoLimits, fileFilter: videoFileFilter });
 const uploadMediaMulter = multer({ storage, limits: videoLimits, fileFilter: mediaFileFilter });
 /**
- * Accepts one file in field `image` or `file` (React Native FormData friendly).
+ * Accepts image file in field `image`, `file`, `media`, or `files`.
  */
 export function uploadImageFields(req, res, next) {
     uploadImageMulter.fields([
@@ -57,14 +57,14 @@ export function uploadImageFields(req, res, next) {
         { name: "files", maxCount: 1 },
     ])(req, res, (err) => {
         if (err) {
-            const msg = err instanceof Error ? err.message : "Upload failed";
-            return res.status(400).json({ message: msg });
+            const msg = err instanceof Error ? err.message : "Image upload failed";
+            return res.status(400).json({ success: false, message: msg, error: "FILE_VALIDATION_ERROR" });
         }
         next();
     });
 }
 /**
- * Accepts video file in field `video` or `file`.
+ * Accepts video file in field `video`, `file`, `media`, or `files`.
  */
 export function uploadVideoFields(req, res, next) {
     uploadVideoMulter.fields([
@@ -74,14 +74,14 @@ export function uploadVideoFields(req, res, next) {
         { name: "files", maxCount: 1 },
     ])(req, res, (err) => {
         if (err) {
-            const msg = err instanceof Error ? err.message : "Upload failed";
-            return res.status(400).json({ message: msg });
+            const msg = err instanceof Error ? err.message : "Video upload failed";
+            return res.status(400).json({ success: false, message: msg, error: "FILE_VALIDATION_ERROR" });
         }
         next();
     });
 }
 /**
- * Accepts image or video file in field `file`, `video`, `image`, `media`, `files`.
+ * Accepts image or video file in field `file`, `video`, `image`, `media`, or `files`.
  */
 export function uploadMediaFields(req, res, next) {
     uploadMediaMulter.fields([
@@ -92,8 +92,8 @@ export function uploadMediaFields(req, res, next) {
         { name: "files", maxCount: 1 },
     ])(req, res, (err) => {
         if (err) {
-            const msg = err instanceof Error ? err.message : "Upload failed";
-            return res.status(400).json({ message: msg });
+            const msg = err instanceof Error ? err.message : "Media upload failed";
+            return res.status(400).json({ success: false, message: msg, error: "FILE_VALIDATION_ERROR" });
         }
         next();
     });

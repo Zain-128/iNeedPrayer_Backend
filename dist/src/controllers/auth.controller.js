@@ -30,10 +30,7 @@ export const login = async (req, res) => {
     catch (err) {
         const e = err;
         const status = e.statusCode ?? 500;
-        return res.status(status).json({
-            message: e.message ?? "Login failed",
-            ...(e.code ? { code: e.code } : {}),
-        });
+        return res.status(status).json({ message: e.message ?? "Login failed" });
     }
 };
 export const getMe = async (req, res) => {
@@ -48,75 +45,5 @@ export const getMe = async (req, res) => {
         const e = err;
         const status = e.statusCode ?? 500;
         return res.status(status).json({ message: e.message ?? "Failed to get user" });
-    }
-};
-export const forgotPassword = async (req, res) => {
-    try {
-        const { email } = req.body;
-        if (!email || typeof email !== "string") {
-            return res.status(400).json({ message: "Please provide email" });
-        }
-        const result = await authService.forgotPassword(email);
-        return res.status(200).json(result);
-    }
-    catch (err) {
-        const e = err;
-        const status = e.statusCode ?? 500;
-        return res
-            .status(status)
-            .json({ message: e.message ?? "Failed to process request" });
-    }
-};
-export const resetPassword = async (req, res) => {
-    try {
-        const { email, code, password } = req.body;
-        if (!email || code === undefined || code === null || !password) {
-            return res.status(400).json({
-                message: "Please provide email, code, and password",
-            });
-        }
-        await authService.resetPassword(email, String(code), password);
-        return res.status(200).json({ message: "Password has been reset" });
-    }
-    catch (err) {
-        const e = err;
-        const status = e.statusCode ?? 500;
-        return res
-            .status(status)
-            .json({ message: e.message ?? "Password reset failed" });
-    }
-};
-export const socialLogin = async (req, res) => {
-    try {
-        const result = await authService.socialLogin(req.body);
-        return res.status(200).json({
-            message: "User login successfully",
-            user: result.user,
-            accessToken: result.accessToken,
-            refreshToken: result.refreshToken,
-            token: result.token,
-        });
-    }
-    catch (err) {
-        const e = err;
-        const status = e.statusCode ?? 500;
-        return res.status(status).json({
-            message: e.message ?? "Social login failed",
-            ...(e.code ? { code: e.code } : {}),
-        });
-    }
-};
-export const deleteAccount = async (req, res) => {
-    try {
-        if (!req.userId) {
-            return res.status(401).json({ message: "Not authorized" });
-        }
-        const result = await authService.deleteAccount(req.userId);
-        return res.status(200).json(result);
-    }
-    catch (err) {
-        const e = err;
-        const status = e.statusCode ?? 500;
-        return res.status(status).json({ message: e.message ?? "Failed to delete account" });
     }
 };

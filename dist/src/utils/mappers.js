@@ -32,20 +32,6 @@ export function mapPost(post, opts) {
         : post.translations;
     const authorId = post.author?._id?.toString?.() ?? "";
     const isMine = !!(opts?.viewerId && authorId && opts.viewerId === authorId);
-    const rawImages = Array.isArray(post.images) && post.images.length > 0
-        ? post.images
-        : post.image
-            ? [post.image]
-            : [];
-    const images = rawImages.map((u) => normalizeMediaUrl(u)).filter(Boolean);
-    const primaryImage = images[0] ?? normalizeMediaUrl(post.image ?? "");
-    const rawVideos = Array.isArray(post.videos) && post.videos.length > 0
-        ? post.videos
-        : post.video
-            ? [post.video]
-            : [];
-    const videos = rawVideos.map((u) => normalizeMediaUrl(u)).filter(Boolean);
-    const primaryVideo = videos[0] ?? normalizeMediaUrl(post.video ?? "");
     const groupId = post.group && typeof post.group === "object"
         ? "_id" in post.group && post.group._id
             ? post.group._id.toString()
@@ -103,10 +89,7 @@ export function mapPost(post, opts) {
         ...(translations && Object.keys(translations).length
             ? { translations }
             : {}),
-        image: primaryImage,
-        images,
-        video: primaryVideo,
-        videos,
+        image: normalizeMediaUrl(post.image ?? ""),
         mode: post.mode ?? "prayer",
         ...(group ? { group } : {}),
         ...(groupId ? { groupId } : {}),

@@ -142,7 +142,8 @@ export async function editComment(commentId, userId, input) {
     let nextImage = comment.image ?? "";
     if (updates.removeImage === true || updates.image === null || updates.image === "") {
         nextImage = "";
-    } else if (typeof updates.image === "string") {
+    }
+    else if (typeof updates.image === "string") {
         nextImage = updates.image.trim();
     }
     if (!nextText && !nextImage) {

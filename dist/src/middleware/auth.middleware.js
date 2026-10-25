@@ -1,5 +1,6 @@
+import jwt from "jsonwebtoken";
+import { JWT_SECRET } from "../contants.js";
 import { User } from "../models/user.model.js";
-import { verifyAccessToken } from "../utils/jwt.util.js";
 export const protect = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
@@ -7,18 +8,12 @@ export const protect = async (req, res, next) => {
         return res.status(401).json({ message: "Not authorized; no token" });
     }
     try {
-        const { userId } = verifyAccessToken(token);
-        const user = await User.findById(userId);
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const user = await User.findById(decoded.userId);
         if (!user) {
             return res.status(401).json({ message: "User no longer exists" });
         }
-        if (user.status === "blocked") {
-            return res.status(403).json({
-                message: "Account is blocked",
-                code: "ACCOUNT_BLOCKED",
-            });
-        }
-        req.userId = userId;
+        req.userId = decoded.userId;
         req.user = user;
         next();
     }

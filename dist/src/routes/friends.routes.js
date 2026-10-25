@@ -4,7 +4,6 @@ import * as friendsController from "../controllers/friends.controller.js";
 const router = Router();
 router.get("/requests/incoming", protect, friendsController.listIncomingRequests);
 router.get("/requests/outgoing", protect, friendsController.listOutgoingRequests);
-router.get("/group-invitations/incoming", protect, friendsController.listIncomingGroupInvitations);
 router.delete("/request/:userId", protect, friendsController.cancelRequest);
 router.delete("/:userId", protect, friendsController.removeFriend);
 router.post("/request", protect, friendsController.sendRequest);

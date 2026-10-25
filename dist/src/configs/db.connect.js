@@ -1,11 +1,10 @@
 import mongoose from "mongoose";
-import { MONGO_URI } from "../contants.js";
 export const dbConnect = async () => {
     try {
-        if (!MONGO_URI) {
-            throw new Error("MONGO_URI is not set. Configure it in .env");
-        }
-        await mongoose.connect(MONGO_URI);
+        const uri = process.env.MONGO_URI ||
+            process.env.MONGODB_URI ||
+            "mongodb+srv://ineedprayerapp_db_user:YGQTdzac7zVcF4im@cluster0.xbnmoeg.mongodb.net/?appName=Cluster0";
+        await mongoose.connect(uri);
         console.log("Connected to MongoDB");
     }
     catch (error) {

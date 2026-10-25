@@ -23,33 +23,16 @@ export function buildLocationFull(parts) {
         .filter(Boolean)
         .join(", ");
 }
-function normalizeSocialLinks(raw) {
-    if (!Array.isArray(raw))
-        return [];
-    return raw
-        .map((item) => {
-        if (!item || typeof item !== "object")
-            return null;
-        const row = item;
-        const platform = String(row.platform ?? "").trim().toLowerCase();
-        const url = String(row.url ?? "").trim();
-        if (!platform || !url)
-            return null;
-        return { platform, url };
-    })
-        .filter((x) => !!x);
-}
 export function normalizeChurchInput(body) {
     const b = (body ?? {});
-    const str = (key) => String(b[key] ?? "").trim();
-    const country = str("country");
-    const state = str("state");
-    const city = str("city");
-    const streetAddress = str("streetAddress");
-    const landmark = str("landmark");
+    const country = (b.country ?? "").trim();
+    const state = (b.state ?? "").trim();
+    const city = (b.city ?? "").trim();
+    const streetAddress = (b.streetAddress ?? "").trim();
+    const landmark = (b.landmark ?? "").trim();
     return {
-        name: str("name") || str("churchName"),
-        website: str("website"),
+        name: (b.name ?? b.churchName ?? "").trim(),
+        website: (b.website ?? "").trim(),
         country,
         state,
         city,
@@ -59,7 +42,7 @@ export function normalizeChurchInput(body) {
             city,
             state,
             country,
-            locationShort: str("locationShort"),
+            locationShort: b.locationShort,
         }),
         locationFull: buildLocationFull({
             streetAddress,
@@ -67,21 +50,26 @@ export function normalizeChurchInput(body) {
             city,
             state,
             country,
-            locationFull: str("locationFull"),
+            locationFull: b.locationFull,
         }),
-        email: str("email") || str("businessEmail"),
-        phone: str("phone") || str("businessPhone"),
-        shortBio: str("shortBio"),
-        about: str("about") || str("aboutChurch"),
-        image: str("image") || str("logo"),
-        bannerImage: str("bannerImage") || str("banner"),
-        denomination: str("denomination"),
-        liveStreamUrl: str("liveStreamUrl"),
-        pastorName: str("pastorName") ||
-            str("pastorOrLeaderName") ||
-            str("pastor"),
-        socialLinks: normalizeSocialLinks(b.socialLinks),
-        socialLinksProvided: Array.isArray(b.socialLinks),
+        email: (b.email ?? b.businessEmail ?? "").trim(),
+        phone: (b.phone ?? b.businessPhone ?? "").trim(),
+        shortBio: (b.shortBio ?? "").trim(),
+        about: (b.about ?? b.aboutChurch ?? "").trim(),
+        image: (b.image ?? b.logo ?? "").trim(),
+        bannerImage: (b.bannerImage ?? b.banner ?? "").trim(),
+        denomination: (b.denomination ?? "").trim(),
+        liveStreamUrl: (b.liveStreamUrl ?? "").trim(),
+        pastorName: (b.pastorName ?? b.pastorOrLeaderName ?? "").trim(),
+        socialLinks: Array.isArray(body?.socialLinks)
+            ? body.socialLinks
+                .filter((s) => s && (s.platform || s.url))
+                .map((s) => ({
+                platform: String(s.platform ?? "").trim(),
+                url: String(s.url ?? "").trim(),
+            }))
+            : [],
+        socialLinksProvided: Array.isArray(body?.socialLinks),
     };
 }
 export function validateCreateChurchInput(input) {

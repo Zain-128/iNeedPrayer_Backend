@@ -172,35 +172,8 @@ export function registerLiveSocket(io) {
             socket.leave(`live-scope:${scope}:${entityId}`);
         });
         socket.on("host-heartbeat", async (data) => {
-            let scope = typeof data === "object"
-                ? data?.scope
-                : undefined;
-            let entityId = typeof data === "object" ? data?.entityId : undefined;
-            const sessionId = typeof data === "string"
-                ? data
-                : typeof data === "object"
-                    ? data?.sessionId
-                    : undefined;
-            if ((!scope || !entityId) &&
-                sessionId &&
-                mongoose.isValidObjectId(sessionId)) {
-                const { LiveStreamSession } = await import("../models/liveStreamSession.model.js");
-                const session = await LiveStreamSession.findById(sessionId)
-                    .select("churchId groupId status hostUserId")
-                    .lean();
-                if (session &&
-                    session.status === "live" &&
-                    session.hostUserId.toString() === userId) {
-                    if (session.churchId) {
-                        scope = "church";
-                        entityId = session.churchId.toString();
-                    }
-                    else if (session.groupId) {
-                        scope = "group";
-                        entityId = session.groupId.toString();
-                    }
-                }
-            }
+            const scope = data?.scope;
+            const entityId = data?.entityId;
             if ((scope !== "church" && scope !== "group") ||
                 !entityId ||
                 !mongoose.isValidObjectId(entityId)) {

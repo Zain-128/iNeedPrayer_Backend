@@ -1,4 +1,3 @@
-import "dotenv/config";
 import "./src/contants.js";
 import { B2_BUCKET, isB2Configured, PORT } from "./src/contants.js";
 import app from "./src/app.js";

@@ -19,6 +19,11 @@ const groupSchema = new mongoose.Schema(
       enum: ["Public", "Private"],
       default: "Public",
     },
+    subscriptionTier: {
+      type: String,
+      enum: ["Standard", "Premium"],
+      default: "Standard",
+    },
     status: {
       type: String,
       enum: ["Active", "Pending", "Suspended"],

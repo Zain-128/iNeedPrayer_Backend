@@ -59,10 +59,6 @@ export const discoverGroups = async (req, res) => {
 export const getGroup = async (req, res) => {
     try {
         const id = paramStr(req.params.id);
-        if (id === "mine")
-            return listMyGroups(req, res);
-        if (id === "discover")
-            return discoverGroups(req, res);
         if (!mongoose.isValidObjectId(id))
             return invalidId(res);
         const group = await groupsService.getGroup(id, req.userId);
@@ -78,7 +74,7 @@ export const createGroup = async (req, res) => {
         if (!req.userId)
             return res.status(401).json({ message: "Unauthorized" });
         const group = await groupsService.createGroup(req.userId, req.body ?? {});
-        return res.status(201).json({ success: true, group, data: group });
+        return res.status(201).json({ group });
     }
     catch (err) {
         const e = err;
@@ -510,7 +506,6 @@ export const updateMemberRole = async (req, res) => {
         return res.status(e.statusCode ?? 500).json({ message: e.message });
     }
 };
-
 export const getGroupConversation = async (req, res) => {
     try {
         if (!req.userId)
@@ -519,10 +514,233 @@ export const getGroupConversation = async (req, res) => {
         if (!mongoose.isValidObjectId(id)) {
             return invalidId(res);
         }
-        const result = await chatService.getOrCreateGroupChatForCommunityGroup(
-            id,
-            req.userId
-        );
+        const result = await chatService.getOrCreateGroupChatForCommunityGroup(id, req.userId);
+        return res.json(result);
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const updatePrivacy = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const { privacy } = req.body ?? {};
+        if (privacy !== "Public" && privacy !== "Private") {
+            return res.status(400).json({ message: "Privacy must be Public or Private" });
+        }
+        const group = await groupsService.updateGroupPrivacy(id, req.userId, privacy);
+        return res.json({ group });
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const manageJoinRequest = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        const userId = paramStr(req.params.userId);
+        if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(userId)) {
+            return invalidId(res);
+        }
+        const action = req.body?.action || req.body?.status;
+        if (action === "reject" || action === "rejected") {
+            const result = await groupsService.rejectJoinRequest(id, req.userId, userId);
+            return res.json(result);
+        }
+        const result = await groupsService.approveJoinRequest(id, req.userId, userId);
+        return res.json(result);
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const assignEditor = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        const userId = paramStr(req.params.userId);
+        if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(userId)) {
+            return invalidId(res);
+        }
+        const result = await groupsService.assignGroupEditor(id, req.userId, userId);
+        return res.json(result);
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const removeEditor = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        const userId = paramStr(req.params.userId);
+        if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(userId)) {
+            return invalidId(res);
+        }
+        const result = await groupsService.removeGroupEditor(id, req.userId, userId);
+        return res.json(result);
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const getNotificationSettings = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const settings = await groupsService.getCommunityNotificationSettings(id, req.userId);
+        return res.json({ settings });
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const updateNotificationSettings = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const settings = await groupsService.updateCommunityNotificationSettings(id, req.userId, req.body ?? {});
+        return res.json({ settings });
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const getNotificationPreferences = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const preferences = await groupsService.getMyGroupNotificationPreferences(id, req.userId);
+        return res.json({ preferences });
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const updateNotificationPreferences = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const preferences = await groupsService.updateMyGroupNotificationPreferences(id, req.userId, req.body ?? {});
+        return res.json({ preferences });
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const getAnalytics = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const analytics = await groupsService.getGroupAnalytics(id, req.userId);
+        return res.json({ analytics });
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const getSubscription = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const subscription = await groupsService.getGroupSubscriptionDetails(id, req.userId);
+        return res.json({ subscription });
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const getPermissionsAndLimits = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const details = await groupsService.getGroupPermissionsAndLimits(id, req.userId);
+        return res.json(details);
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const getRoleLimits = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const limits = await groupsService.getGroupStaffLimits(id);
+        return res.json({ limits });
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const acceptMyInvite = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const result = await groupsService.acceptGroupInvite(id, req.userId, req.userId);
+        return res.json(result);
+    }
+    catch (err) {
+        const e = err;
+        return res.status(e.statusCode ?? 500).json({ message: e.message });
+    }
+};
+export const declineInvite = async (req, res) => {
+    try {
+        if (!req.userId)
+            return res.status(401).json({ message: "Unauthorized" });
+        const id = paramStr(req.params.id);
+        const userId = paramStr(req.params.userId) || req.userId;
+        if (!mongoose.isValidObjectId(id))
+            return invalidId(res);
+        const result = await groupsService.rejectGroupInvite(id, req.userId, userId);
         return res.json(result);
     }
     catch (err) {

@@ -637,7 +637,7 @@ export async function getConversationDetails(
 export async function updateGroupConversation(
   conversationId: string,
   actorId: string,
-  updates: { title?: string; image?: string; description?: string }
+  updates: { title?: string; image?: string; description?: string; privacy?: string }
 ) {
   const conv = await Conversation.findById(conversationId);
   if (!conv) throw httpError("Conversation not found", 404);

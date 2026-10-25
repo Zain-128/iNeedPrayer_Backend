@@ -23,5 +23,4 @@ const groupInviteSchema = new mongoose.Schema({
 }, { timestamps: true });
 groupInviteSchema.index({ group: 1, user: 1 }, { unique: true });
 groupInviteSchema.index({ group: 1, status: 1 });
-groupInviteSchema.index({ user: 1, status: 1 });
 export const GroupInvite = mongoose.model("GroupInvite", groupInviteSchema);

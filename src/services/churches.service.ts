@@ -285,7 +285,7 @@ export async function getChurch(id: string, userId?: string) {
   const { followedSet, myChurchSet } = await loadUserContext(userId);
   const isMine = userId ? myChurchSet.has(c._id.toString()) : false;
   if (
-    (c.status === "Suspended" || c.status === "Rejected") &&
+    ((c as any).status === "Suspended" || (c as any).status === "Rejected") &&
     !isMine
   ) {
     const err = new Error("Church not found");

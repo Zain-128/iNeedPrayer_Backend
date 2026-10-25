@@ -512,7 +512,7 @@ export const editMessage = async (req: AuthRequest, res: Response) => {
     if (io) {
       io.to(`chat:${id}`).emit("message-edited", {
         conversationId: id,
-        message: result.message,
+        message: result,
       });
       await broadcastChatUpdated(io, id);
     }

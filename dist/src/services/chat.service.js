@@ -9,13 +9,11 @@ import { Group } from "../models/group.model.js";
 import { GroupMember } from "../models/groupMember.model.js";
 import { timeAgo } from "../utils/timeAgo.js";
 import { createNotification } from "./notifications.service.js";
-
 function httpError(message, statusCode) {
     const err = new Error(message);
     err.statusCode = statusCode;
     return err;
 }
-
 export async function toConversationListItem(conv, viewerId) {
     const base = {
         id: conv._id.toString(),
@@ -23,7 +21,6 @@ export async function toConversationListItem(conv, viewerId) {
         time: conv.lastMessageAt ? timeAgo(conv.lastMessageAt) : "",
     };
     const kind = conv.kind || "direct";
-
     // Unread count
     const lastRead = conv.lastReadAt instanceof Map
         ? conv.lastReadAt.get(viewerId)
@@ -36,19 +33,15 @@ export async function toConversationListItem(conv, viewerId) {
         unreadQuery.createdAt = { $gt: lastRead };
     }
     const unreadCount = await Message.countDocuments(unreadQuery);
-
     // Archive & Mute
     const isArchived = Array.isArray(conv.archivedBy) &&
         conv.archivedBy.some((id) => id?.toString?.() === viewerId);
-
     const muteEntry = Array.isArray(conv.mutedBy) &&
         conv.mutedBy.find((m) => (m.user?._id?.toString?.() ?? m.user?.toString?.()) === viewerId);
     const isMuted = !!(muteEntry &&
         (!muteEntry.mutedUntil || new Date(muteEntry.mutedUntil) > new Date()));
-
     const status = conv.status || "active";
     const isRequest = status === "pending" && conv.requestedBy?.toString() !== viewerId;
-
     if (kind === "group") {
         const groupId = conv.group?._id?.toString() || conv.group?.toString() || "";
         return {
@@ -68,14 +61,12 @@ export async function toConversationListItem(conv, viewerId) {
             privacy: conv.privacy || "private",
         };
     }
-
     const peerId = conv.members
         .map((m) => (m._id ? m._id.toString() : m.toString()))
         .find((id) => id !== viewerId);
     const peer = peerId
         ? conv.members.find((m) => (m._id ? m._id.toString() : m.toString()) === peerId)
         : null;
-
     return {
         ...base,
         isGroup: false,
@@ -93,16 +84,13 @@ export async function toConversationListItem(conv, viewerId) {
         isRequest,
     };
 }
-
 export async function listConversations(userId, opts) {
     const tab = opts?.tab || "current"; // "current" | "archived" | "requests"
     const hidden = await ConversationHide.find({ user: userId }).distinct("conversation");
     const hiddenSet = new Set(hidden.map((id) => id.toString()));
-
     const query = {
         members: new mongoose.Types.ObjectId(userId),
     };
-
     if (tab === "archived") {
         query.archivedBy = new mongoose.Types.ObjectId(userId);
         query.status = { $ne: "declined" };
@@ -120,17 +108,15 @@ export async function listConversations(userId, opts) {
             { status: "pending", requestedBy: new mongoose.Types.ObjectId(userId) },
         ];
     }
-
     const convs = await Conversation.find(query)
         .sort({ lastMessageAt: -1, updatedAt: -1 })
         .populate("members", "name avatar")
         .lean();
-
     const out = [];
     for (const c of convs) {
         if (hiddenSet.has(c._id.toString()))
             continue;
-        const members = c.members || [];
+        const members = (c.members || []);
         out.push(await toConversationListItem({
             _id: c._id,
             kind: c.kind,
@@ -152,7 +138,6 @@ export async function listConversations(userId, opts) {
     }
     return out;
 }
-
 export async function getOrCreateConversation(userId, peerUserId) {
     if (userId === peerUserId) {
         throw httpError("Invalid peer", 400);
@@ -175,7 +160,6 @@ export async function getOrCreateConversation(userId, peerUserId) {
         memberKey: key,
         $or: [{ kind: "direct" }, { kind: { $exists: false } }],
     });
-
     // Check friendship status
     const isFriend = await FriendRequest.exists({
         $or: [
@@ -183,7 +167,6 @@ export async function getOrCreateConversation(userId, peerUserId) {
             { from: peerUserId, to: userId, status: "accepted" },
         ],
     });
-
     if (!conv) {
         conv = await Conversation.create({
             memberKey: key,
@@ -200,37 +183,28 @@ export async function getOrCreateConversation(userId, peerUserId) {
         conv.status = "active";
         await conv.save();
     }
-
     await ConversationHide.deleteOne({
         user: userId,
         conversation: conv._id,
     });
-
     return { conversationId: conv._id.toString(), status: conv.status || "active" };
 }
-
 export async function createGroupConversation(creatorId, body) {
     if (body.groupId && mongoose.isValidObjectId(body.groupId)) {
         return getOrCreateGroupChatForCommunityGroup(body.groupId, creatorId);
     }
-
     const trimmedTitle = (body.title || "").trim();
     const possibleGroupName = trimmedTitle.endsWith(" Chat")
         ? trimmedTitle.slice(0, -" Chat".length).trim()
         : trimmedTitle;
-
     if (possibleGroupName) {
         const matchedGroup = await Group.findOne({
             $or: [{ name: trimmedTitle }, { name: possibleGroupName }],
         }).select("_id");
         if (matchedGroup) {
-            return getOrCreateGroupChatForCommunityGroup(
-                matchedGroup._id.toString(),
-                creatorId
-            );
+            return getOrCreateGroupChatForCommunityGroup(matchedGroup._id.toString(), creatorId);
         }
     }
-
     if (!trimmedTitle) {
         throw httpError("title is required", 400);
     }
@@ -254,12 +228,10 @@ export async function createGroupConversation(creatorId, body) {
         privacy: body.privacy === "public" ? "public" : "private",
         admins: [new mongoose.Types.ObjectId(creatorId)],
     });
-
     await ConversationHide.deleteOne({
         user: creatorId,
         conversation: conv._id,
     });
-
     // System message
     const creatorUser = await User.findById(creatorId).select("name").lean();
     const creatorName = creatorUser?.name || "Admin";
@@ -269,29 +241,23 @@ export async function createGroupConversation(creatorId, body) {
         text: `${creatorName} created group "${trimmedTitle}"`,
         messageType: "system",
     });
-
     return { conversationId: conv._id.toString() };
 }
-
 export async function getOrCreateGroupChatForCommunityGroup(groupId, userId) {
     const group = await Group.findById(groupId);
     if (!group) {
         throw httpError("Group not found", 404);
     }
-
     const isPrivate = group.privacy === "Private";
     const isMember = (await GroupMember.findOne({ group: groupId, user: userId })) ||
         group.createdBy?.toString() === userId;
-
     if (isPrivate && !isMember) {
         throw httpError("This is a private group. Join request must be approved first.", 403);
     }
-
     const key = `grp:${groupId}`;
     let conv = await Conversation.findOne({
         $or: [{ group: groupId }, { memberKey: key }],
     });
-
     const memberDocs = await GroupMember.find({ group: groupId })
         .select("user role")
         .lean();
@@ -300,7 +266,6 @@ export async function getOrCreateGroupChatForCommunityGroup(groupId, userId) {
         memberUserIds.add(group.createdBy.toString());
     if (userId)
         memberUserIds.add(userId);
-
     const members = [...memberUserIds].map((id) => new mongoose.Types.ObjectId(id));
     const adminUserIds = memberDocs
         .filter((m) => m.role === "admin" || m.role === "owner")
@@ -308,7 +273,6 @@ export async function getOrCreateGroupChatForCommunityGroup(groupId, userId) {
     if (group.createdBy)
         adminUserIds.push(group.createdBy.toString());
     const admins = [...new Set(adminUserIds)].map((id) => new mongoose.Types.ObjectId(id));
-
     if (!conv) {
         conv = await Conversation.create({
             memberKey: key,
@@ -333,15 +297,12 @@ export async function getOrCreateGroupChatForCommunityGroup(groupId, userId) {
         conv.privacy = isPrivate ? "private" : "public";
         await conv.save();
     }
-
     await ConversationHide.deleteOne({
         user: userId,
         conversation: conv._id,
     });
-
     return { conversationId: conv._id.toString() };
 }
-
 export async function leaveGroupConversation(conversationId, userId) {
     const conv = await Conversation.findById(conversationId);
     if (!conv) {
@@ -359,8 +320,7 @@ export async function leaveGroupConversation(conversationId, userId) {
     if (conv.members.length && !conv.admins.length) {
         conv.admins = [conv.members[0]];
     }
-
-    // System message
+    // System message before deleting or saving
     const leaver = await User.findById(userId).select("name").lean();
     const leaverName = leaver?.name || "User";
     const sysMsg = await Message.create({
@@ -371,7 +331,6 @@ export async function leaveGroupConversation(conversationId, userId) {
     });
     conv.lastMessageText = sysMsg.text;
     conv.lastMessageAt = sysMsg.createdAt;
-
     if (conv.members.length < 1) {
         await Message.deleteMany({ conversation: conv._id });
         await ConversationHide.deleteMany({ conversation: conv._id });
@@ -381,7 +340,6 @@ export async function leaveGroupConversation(conversationId, userId) {
     await conv.save();
     return { left: true, deleted: false };
 }
-
 export async function removeMemberFromGroup(conversationId, actorId, targetUserId) {
     if (!mongoose.isValidObjectId(conversationId) ||
         !mongoose.isValidObjectId(targetUserId)) {
@@ -405,7 +363,6 @@ export async function removeMemberFromGroup(conversationId, actorId, targetUserI
     }
     conv.members = conv.members.filter((m) => m.toString() !== targetUserId);
     conv.admins = conv.admins.filter((a) => a.toString() !== targetUserId);
-
     const actorUser = await User.findById(actorId).select("name").lean();
     const targetUser = await User.findById(targetUserId).select("name").lean();
     const sysMsg = await Message.create({
@@ -416,7 +373,6 @@ export async function removeMemberFromGroup(conversationId, actorId, targetUserI
     });
     conv.lastMessageText = sysMsg.text;
     conv.lastMessageAt = sysMsg.createdAt;
-
     if (conv.members.length < 1) {
         await Message.deleteMany({ conversation: conv._id });
         await ConversationHide.deleteMany({ conversation: conv._id });
@@ -426,7 +382,6 @@ export async function removeMemberFromGroup(conversationId, actorId, targetUserI
     await conv.save();
     return { removed: true, deleted: false };
 }
-
 export async function addMembersToGroup(conversationId, actorId, userIds) {
     if (!mongoose.isValidObjectId(conversationId)) {
         throw httpError("Invalid conversation id", 400);
@@ -454,7 +409,6 @@ export async function addMembersToGroup(conversationId, actorId, userIds) {
     }
     const newMembers = newIds.map((id) => new mongoose.Types.ObjectId(id));
     conv.members.push(...newMembers);
-
     const actorUser = await User.findById(actorId).select("name").lean();
     const addedUsers = await User.find({ _id: { $in: newMembers } })
         .select("name")
@@ -468,21 +422,17 @@ export async function addMembersToGroup(conversationId, actorId, userIds) {
     });
     conv.lastMessageText = sysMsg.text;
     conv.lastMessageAt = sysMsg.createdAt;
-
     await conv.save();
     return { added: true, conversationId };
 }
-
 export async function getConversationDetails(conversationId, userId) {
     const conv = await Conversation.findById(conversationId)
         .populate("members", "name avatar bio city state")
         .populate("group", "name image description privacy memberCount")
         .lean();
-
     if (!conv || !conv.members.some((m) => m._id.toString() === userId)) {
         throw httpError("Conversation not found", 404);
     }
-
     const adminSet = new Set((conv.admins || []).map((a) => a.toString()));
     const membersWithRoles = (conv.members || []).map((m) => ({
         id: m._id.toString(),
@@ -493,7 +443,6 @@ export async function getConversationDetails(conversationId, userId) {
         state: m.state || "",
         role: adminSet.has(m._id.toString()) ? "admin" : "member",
     }));
-
     return {
         id: conv._id.toString(),
         kind: conv.kind || "direct",
@@ -519,7 +468,6 @@ export async function getConversationDetails(conversationId, userId) {
         createdAt: conv.createdAt,
     };
 }
-
 export async function updateGroupConversation(conversationId, actorId, updates) {
     const conv = await Conversation.findById(conversationId);
     if (!conv)
@@ -529,7 +477,6 @@ export async function updateGroupConversation(conversationId, actorId, updates) 
     if (!conv.admins.some((a) => a.toString() === actorId)) {
         throw httpError("Only admins can update group info", 403);
     }
-
     if (updates.title && typeof updates.title === "string" && updates.title.trim()) {
         conv.title = updates.title.trim();
     }
@@ -539,7 +486,6 @@ export async function updateGroupConversation(conversationId, actorId, updates) 
     if (updates.description !== undefined && typeof updates.description === "string") {
         conv.description = updates.description.trim();
     }
-
     const actorUser = await User.findById(actorId).select("name").lean();
     const sysMsg = await Message.create({
         conversation: conv._id,
@@ -549,7 +495,6 @@ export async function updateGroupConversation(conversationId, actorId, updates) 
     });
     conv.lastMessageText = sysMsg.text;
     conv.lastMessageAt = sysMsg.createdAt;
-
     await conv.save();
     return {
         success: true,
@@ -559,7 +504,6 @@ export async function updateGroupConversation(conversationId, actorId, updates) 
         description: conv.description,
     };
 }
-
 export async function promoteToAdmin(conversationId, actorId, targetUserId) {
     const conv = await Conversation.findById(conversationId);
     if (!conv)
@@ -586,7 +530,6 @@ export async function promoteToAdmin(conversationId, actorId, targetUserId) {
     }
     return { success: true, conversationId, adminId: targetUserId };
 }
-
 export async function demoteAdmin(conversationId, actorId, targetUserId) {
     const conv = await Conversation.findById(conversationId);
     if (!conv)
@@ -604,7 +547,6 @@ export async function demoteAdmin(conversationId, actorId, targetUserId) {
     await conv.save();
     return { success: true, conversationId, demotedId: targetUserId };
 }
-
 export async function markConversationRead(conversationId, userId) {
     const conv = await Conversation.findById(conversationId);
     if (!conv)
@@ -619,13 +561,11 @@ export async function markConversationRead(conversationId, userId) {
     await conv.save();
     return { success: true, conversationId, unreadCount: 0 };
 }
-
 export async function getUnreadMessagesCount(userId) {
     const convs = await Conversation.find({
         members: new mongoose.Types.ObjectId(userId),
         status: { $ne: "declined" },
     }).lean();
-
     let totalUnread = 0;
     for (const conv of convs) {
         const lastRead = conv.lastReadAt instanceof Map
@@ -643,7 +583,6 @@ export async function getUnreadMessagesCount(userId) {
     }
     return { totalUnread };
 }
-
 export async function acceptMessageRequest(conversationId, userId) {
     const conv = await Conversation.findById(conversationId);
     if (!conv)
@@ -655,7 +594,6 @@ export async function acceptMessageRequest(conversationId, userId) {
     await conv.save();
     return { success: true, conversationId, status: "active" };
 }
-
 export async function declineMessageRequest(conversationId, userId) {
     const conv = await Conversation.findById(conversationId);
     if (!conv)
@@ -668,7 +606,6 @@ export async function declineMessageRequest(conversationId, userId) {
     await ConversationHide.findOneAndUpdate({ user: userId, conversation: conversationId }, {}, { upsert: true });
     return { success: true, conversationId, status: "declined" };
 }
-
 export async function archiveConversation(conversationId, userId, archiveState) {
     const conv = await Conversation.findById(conversationId);
     if (!conv)
@@ -679,7 +616,6 @@ export async function archiveConversation(conversationId, userId, archiveState) 
     const shouldArchive = archiveState !== undefined
         ? Boolean(archiveState)
         : !conv.archivedBy.some((id) => id.toString() === userId);
-
     if (shouldArchive) {
         if (!conv.archivedBy.some((id) => id.toString() === userId)) {
             conv.archivedBy.push(new mongoose.Types.ObjectId(userId));
@@ -691,7 +627,6 @@ export async function archiveConversation(conversationId, userId, archiveState) 
     await conv.save();
     return { success: true, conversationId, isArchived: shouldArchive };
 }
-
 export async function muteConversation(conversationId, userId, muted, durationMinutes) {
     const conv = await Conversation.findById(conversationId);
     if (!conv)
@@ -699,9 +634,7 @@ export async function muteConversation(conversationId, userId, muted, durationMi
     if (!conv.members.some((m) => m.toString() === userId)) {
         throw httpError("Not allowed", 403);
     }
-
     conv.mutedBy = (conv.mutedBy || []).filter((m) => (m.user?.toString?.() ?? m.user) !== userId);
-
     const shouldMute = muted !== undefined ? Boolean(muted) : true;
     let mutedUntil = null;
     if (shouldMute) {
@@ -716,7 +649,6 @@ export async function muteConversation(conversationId, userId, muted, durationMi
     await conv.save();
     return { success: true, conversationId, isMuted: shouldMute, mutedUntil };
 }
-
 export async function editMessage(conversationId, messageId, userId, newText) {
     const msg = await Message.findById(messageId);
     if (!msg || msg.conversation.toString() !== conversationId) {
@@ -739,7 +671,6 @@ export async function editMessage(conversationId, messageId, userId, newText) {
         editedAt: msg.editedAt,
     };
 }
-
 export async function deleteMessage(conversationId, messageId, userId) {
     const msg = await Message.findById(messageId);
     if (!msg || msg.conversation.toString() !== conversationId) {
@@ -751,7 +682,6 @@ export async function deleteMessage(conversationId, messageId, userId) {
     await msg.deleteOne();
     return { success: true, messageId };
 }
-
 function mapMessageRow(m, viewerId) {
     const pop = m.sender;
     let senderId;
@@ -789,7 +719,6 @@ function mapMessageRow(m, viewerId) {
         createdAt: m.createdAt,
     };
 }
-
 export async function listMessages(conversationId, userId, opts) {
     const conv = await Conversation.findById(conversationId);
     if (!conv || !conv.members.some((m) => m.toString() === userId)) {
@@ -809,7 +738,6 @@ export async function listMessages(conversationId, userId, opts) {
         .lean();
     return msgs.reverse().map((m) => mapMessageRow(m, userId));
 }
-
 export async function persistInboundChatMessage(conversationId, senderId, text, messageType = "text", metadata) {
     const conv = await Conversation.findById(conversationId);
     if (!conv || !conv.members.some((m) => m.toString() === senderId)) {
@@ -818,11 +746,16 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
     let trimmed = typeof text === "string" ? text.trim() : "";
     if (!trimmed) {
         if (metadata?.fileUrl) {
-            if (messageType === "image") trimmed = "📷 Image";
-            else if (messageType === "video") trimmed = "🎥 Video";
-            else if (messageType === "audio") trimmed = "🎵 Audio";
-            else trimmed = "📎 File";
-        } else {
+            if (messageType === "image")
+                trimmed = "📷 Image";
+            else if (messageType === "video")
+                trimmed = "🎥 Video";
+            else if (messageType === "audio")
+                trimmed = "🎵 Audio";
+            else
+                trimmed = "📎 File";
+        }
+        else {
             throw httpError("text is required", 400);
         }
     }
@@ -830,7 +763,6 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
     const mt = allowed.includes(messageType)
         ? messageType
         : "text";
-
     const msg = await Message.create({
         conversation: conversationId,
         sender: senderId,
@@ -842,34 +774,27 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
         mimeType: metadata?.mimeType || "",
         duration: metadata?.duration || 0,
     });
-
     conv.lastMessageText = trimmed.slice(0, 200);
     conv.lastMessageAt = msg.createdAt;
-
     // Mark read for sender
     if (!(conv.lastReadAt instanceof Map)) {
         conv.lastReadAt = new Map(Object.entries(conv.lastReadAt || {}));
     }
     conv.lastReadAt.set(senderId, new Date());
-
     // Auto-activate request if it was pending and recipient replied
     if (conv.status === "pending" && conv.requestedBy?.toString() !== senderId) {
         conv.status = "active";
     }
-
     await conv.save();
-
     const populated = await Message.findById(msg._id)
         .populate("sender", "name avatar")
         .lean();
     const s = populated?.sender;
     const senderUserId = s?._id?.toString() ?? senderId;
-
     // Check muted members
     const mutedUserIds = new Set((conv.mutedBy || [])
         .filter((m) => !m.mutedUntil || new Date(m.mutedUntil) > new Date())
         .map((m) => m.user?.toString()));
-
     for (const mid of conv.members) {
         const midStr = mid.toString();
         if (midStr === senderId || mutedUserIds.has(midStr))
@@ -885,7 +810,6 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
             category: "messages",
         });
     }
-
     const socketPayload = {
         _id: msg._id.toString(),
         conversation: conversationId,
@@ -904,7 +828,6 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
             avatar: s?.avatar ?? "",
         },
     };
-
     const restForSender = {
         id: msg._id.toString(),
         text: msg.text,
@@ -922,20 +845,17 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
         time: timeAgo(msg.createdAt),
         createdAt: msg.createdAt,
     };
-
     return {
         socketPayload,
         restForSender,
         memberUserIds: conv.members.map((m) => m.toString()),
     };
 }
-
 /** @deprecated use persistInboundChatMessage + emit layer */
 export async function sendMessage(conversationId, senderId, text) {
     const r = await persistInboundChatMessage(conversationId, senderId, text);
     return r.restForSender;
 }
-
 export async function hideConversationForUser(userId, conversationId) {
     const conv = await Conversation.findById(conversationId);
     if (!conv || !conv.members.some((m) => m.toString() === userId)) {

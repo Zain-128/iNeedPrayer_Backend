@@ -4,7 +4,7 @@ import { uploadImageFields, uploadVideoFields, uploadMediaFields, } from "../mid
 import * as uploadController from "../controllers/upload.controller.js";
 const router = Router();
 router.post("/image", protect, uploadImageFields, uploadController.uploadImage);
-router.get("/status", uploadController.getUploadStatus);
 router.post("/video", protect, uploadVideoFields, uploadController.uploadVideo);
 router.post("/media", protect, uploadMediaFields, uploadController.uploadMedia);
+router.get("/status", uploadController.getUploadStatus);
 export default router;

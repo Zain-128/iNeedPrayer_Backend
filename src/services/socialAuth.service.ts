@@ -6,7 +6,7 @@ import type { AuthResult } from "./auth.service.js";
 
 const signToken = (userId: string) =>
   jwt.sign({ userId: userId.toString() }, JWT_SECRET, {
-    expiresIn: JWT_EXPIRES_IN,
+    expiresIn: JWT_EXPIRES_IN as any,
   });
 
 const formatResult = (

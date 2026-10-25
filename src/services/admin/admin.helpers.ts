@@ -34,3 +34,23 @@ export function formatDisplayDate(d?: Date | null) {
     year: "numeric",
   });
 }
+
+export function formatMoney(cents: number) {
+  return `$${(cents / 100).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+export function parseMoneyToCents(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.round(value);
+  }
+  if (typeof value === "string") {
+    const cleaned = value.replace(/[^0-9.-]/g, "");
+    const num = Number(cleaned);
+    if (!Number.isFinite(num)) return 0;
+    return Math.round(num * 100);
+  }
+  return 0;
+}

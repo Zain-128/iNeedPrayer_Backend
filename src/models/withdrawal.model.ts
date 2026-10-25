@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 
 export type WithdrawalStatus = "Pending" | "Rejected" | "Paid";
-export type WithdrawalRole = "User" | "Church Owner";
+export type WithdrawalRole = "User" | "Church Owner" | "Group Admin";
 export type WithdrawalMethod = "Bank" | "PayPal" | "Stripe";
 
 const withdrawalSchema = new mongoose.Schema(
@@ -17,7 +17,7 @@ const withdrawalSchema = new mongoose.Schema(
     avatar: { type: String, default: "" },
     role: {
       type: String,
-      enum: ["User", "Church Owner"],
+      enum: ["User", "Church Owner", "Group Admin"],
       default: "User",
       index: true,
     },
@@ -44,6 +44,9 @@ const withdrawalSchema = new mongoose.Schema(
       default: null,
     },
     rejectReason: { type: String, default: "" },
+    ownerType: { type: String, default: "user" },
+    ownerId: { type: String, default: "" },
+    coins: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
