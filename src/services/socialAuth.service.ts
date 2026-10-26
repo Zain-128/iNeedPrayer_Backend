@@ -11,23 +11,31 @@ const signToken = (userId: string) =>
 
 const formatResult = (
   user: any
-): AuthResult & { socialId?: string; provider?: string } => ({
-  user: {
-    _id: user._id.toString(),
-    email: user.email,
-    name: user.name,
-    createdAt: user.createdAt,
-  },
-  token: signToken(user._id.toString()),
-  socialId: user.socialId,
-  provider: user.provider,
-});
+) => {
+  const token = signToken(user._id.toString());
+  return {
+    message: "User login successfully",
+    user: {
+      _id: user._id.toString(),
+      email: user.email,
+      name: user.name,
+      avatar: user.avatar || "",
+      createdAt: user.createdAt,
+    },
+    token,
+    accessToken: token,
+    socialId: user.socialId,
+    provider: user.provider,
+  };
+};
 
 interface SocialLoginInput {
   email?: string;
   name?: string;
   socialId?: string;
   provider?: string;
+  socialLoginId?: string;
+  socialLoginProvider?: string;
 }
 
 export const socialLogin = async ({
@@ -35,8 +43,13 @@ export const socialLogin = async ({
   name,
   socialId,
   provider,
-}: SocialLoginInput): Promise<AuthResult> => {
-  if (!email || !socialId || !provider) {
+  socialLoginId,
+  socialLoginProvider,
+}: SocialLoginInput): Promise<any> => {
+  const actualSocialId = socialId || socialLoginId;
+  const actualProvider = provider || socialLoginProvider;
+
+  if (!email || !actualSocialId || !actualProvider) {
     const err = new Error("email, socialId and provider are required");
     (err as Error & { statusCode?: number }).statusCode = 400;
     throw err;
@@ -45,7 +58,7 @@ export const socialLogin = async ({
   const normalizedEmail = email.toLowerCase();
 
   let user = await User.findOne({
-    $or: [{ socialId, provider }, { email: normalizedEmail }],
+    $or: [{ socialId: actualSocialId, provider: actualProvider }, { email: normalizedEmail }],
   });
 
   if (!user) {
@@ -53,14 +66,14 @@ export const socialLogin = async ({
       email: normalizedEmail,
       password: crypto.randomUUID(),
       name: name || normalizedEmail.split("@")[0],
-      socialId,
-      provider,
+      socialId: actualSocialId,
+      provider: actualProvider,
     });
   } else {
     // optional: attach provider/socialId if missing on existing user
     if (!user.socialId || !user.provider) {
-      user.socialId = socialId;
-      user.provider = provider;
+      user.socialId = actualSocialId;
+      user.provider = actualProvider;
       await user.save();
     }
   }

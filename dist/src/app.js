@@ -98,6 +98,7 @@ app.use(async (_req, _res, next) => {
     next();
 });
 app.use("/api/auth", authRoutes);
+app.use("/api/auth", socialAuthRoutes);
 app.use("/auth", socialAuthRoutes);
 app.use("/api/test", testRoutes);
 app.use("/api/posts", postsRoutes);

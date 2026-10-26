@@ -3,17 +3,28 @@ import * as socialAuthService from "../services/socialAuth.service.js";
 
 export const socialLogin = async (req: Request, res: Response) => {
   try {
-    const { email, name, socialId, provider } = req.body as {
-      email?: string;
-      name?: string;
-      socialId?: string;
-      provider?: string;
-    };
-    const result = await socialAuthService.socialLogin({
+    const {
       email,
       name,
       socialId,
       provider,
+      socialLoginId,
+      socialLoginProvider,
+    } = req.body as {
+      email?: string;
+      name?: string;
+      socialId?: string;
+      provider?: string;
+      socialLoginId?: string;
+      socialLoginProvider?: string;
+    };
+    const result = await socialAuthService.socialLogin({
+      email,
+      name,
+      socialId: socialId || socialLoginId,
+      provider: provider || socialLoginProvider,
+      socialLoginId: socialLoginId || socialId,
+      socialLoginProvider: socialLoginProvider || provider,
     });
     return res.status(200).json(result);
   } catch (err) {
