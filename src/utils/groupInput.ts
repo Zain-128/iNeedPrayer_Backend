@@ -2,6 +2,7 @@ export type NormalizedGroupInput = {
   name: string;
   image: string;
   bannerImage: string;
+  images?: string[];
   description: string;
   privacy?: "Public" | "Private";
 };
@@ -17,10 +18,27 @@ export function normalizeGroupInput(
     privacy = "Public";
   }
 
+  let images: string[] | undefined = undefined;
+  if (Array.isArray(b.images)) {
+    images = b.images.map((x: any) => String(x ?? "").trim()).filter(Boolean);
+  } else if (typeof b.images === "string" && b.images.trim()) {
+    try {
+      const parsed = JSON.parse(b.images);
+      if (Array.isArray(parsed)) {
+        images = parsed.map((x: any) => String(x ?? "").trim()).filter(Boolean);
+      } else {
+        images = [b.images.trim()];
+      }
+    } catch {
+      images = b.images.split(",").map((x: string) => x.trim()).filter(Boolean);
+    }
+  }
+
   return {
     name: (b.name ?? b.groupName ?? "").trim(),
     image: (b.image ?? b.logo ?? "").trim(),
     bannerImage: (b.bannerImage ?? b.banner ?? "").trim(),
+    images,
     description: (b.description ?? "").trim(),
     privacy,
   };

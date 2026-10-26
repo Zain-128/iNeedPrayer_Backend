@@ -5,6 +5,7 @@ const groupSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     image: { type: String, default: "" },
     bannerImage: { type: String, default: "" },
+    images: { type: [String], default: [] },
     description: { type: String, default: "" },
     memberCount: { type: Number, default: 0 },
     createdBy: {

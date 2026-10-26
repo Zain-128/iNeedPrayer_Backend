@@ -39,6 +39,7 @@ type GroupDoc = {
   name: string;
   image?: string;
   bannerImage?: string;
+  images?: string[];
   description?: string;
   memberCount: number;
   createdBy?: mongoose.Types.ObjectId | null;
@@ -52,6 +53,7 @@ type GroupMutable = {
   name: string;
   image: string;
   bannerImage?: string;
+  images?: string[];
   description: string;
   memberCount: number;
   createdBy?: mongoose.Types.ObjectId | null;
@@ -213,6 +215,7 @@ function mapGroup(
 
   const banner = g.bannerImage ?? g.image ?? "";
   const image = g.image ?? "";
+  const images = Array.isArray(g.images) ? g.images : [];
 
   return {
     id,
@@ -223,6 +226,7 @@ function mapGroup(
     image,
     bannerImage: banner,
     banner,
+    images,
     description: g.description ?? "",
     isMyGroup: !!isMyGroup,
     isJoined,
@@ -292,6 +296,7 @@ function applyGroupInput(
   if (!partial || input.name) group.name = input.name;
   if (!partial || input.image) group.image = input.image;
   if (!partial || input.bannerImage) (group as any).bannerImage = input.bannerImage;
+  if (!partial || input.images !== undefined) (group as any).images = input.images || [];
   if (!partial || input.description !== undefined) {
     if (!partial || input.description) group.description = input.description;
   }
@@ -424,6 +429,7 @@ export async function createGroup(
     name: input.name,
     image: input.image,
     bannerImage: input.bannerImage || input.image || "",
+    images: input.images || [],
     description: input.description,
     createdBy: userId,
     privacy,

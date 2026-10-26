@@ -84,6 +84,7 @@ export async function getGroup(id: string) {
     reports: g.reportsCount ?? 0,
     status: g.status || "Active",
     image: g.image || "",
+    images: (g as any).images || [],
     requiresApproval: !!g.requiresApproval,
     createdAt: formatDisplayDate(g.createdAt),
     recentPosts: recentPosts.map((p) => ({

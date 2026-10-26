@@ -148,6 +148,7 @@ function mapGroup(g, userId, memberSet, createdByMeSet) {
         : g.createdBy?.toString() === userId;
     const banner = g.bannerImage ?? g.image ?? "";
     const image = g.image ?? "";
+    const images = Array.isArray(g.images) ? g.images : [];
     return {
         id,
         name: g.name.replace(/\\n/g, "\n"),
@@ -157,6 +158,7 @@ function mapGroup(g, userId, memberSet, createdByMeSet) {
         image,
         bannerImage: banner,
         banner,
+        images,
         description: g.description ?? "",
         isMyGroup: !!isMyGroup,
         isJoined,
@@ -216,6 +218,8 @@ function applyGroupInput(group, input, partial = false) {
         group.image = input.image;
     if (!partial || input.bannerImage)
         group.bannerImage = input.bannerImage;
+    if (!partial || input.images !== undefined)
+        group.images = input.images || [];
     if (!partial || input.description !== undefined) {
         if (!partial || input.description)
             group.description = input.description;
@@ -324,6 +328,7 @@ export async function createGroup(userId, body) {
         name: input.name,
         image: input.image,
         bannerImage: input.bannerImage || input.image || "",
+        images: input.images || [],
         description: input.description,
         createdBy: userId,
         privacy,
