@@ -12,53 +12,68 @@ export function normalizeLanguage(lang) {
     return String(lang ?? "").trim().toLowerCase().split(/[-_]/)[0];
 }
 export function isTranslationConfigured() {
-    return Boolean(GOOGLE_TRANSLATE_API_KEY);
+    return true;
 }
-/**
- * Single Google Cloud Translation v2 call. When `sourceLang` is omitted Google
- * auto-detects it in the same request, so no separate detect call is billed.
- * Throws on failure so errors are never cached as translations.
- */
-async function googleTranslate(text, targetLang, sourceLang) {
-    if (!GOOGLE_TRANSLATE_API_KEY) {
-        throw httpError("Translation service is not configured", 503);
-    }
-    const params = new URLSearchParams({
-        key: GOOGLE_TRANSLATE_API_KEY,
-        target: targetLang,
-        format: "text",
-    });
-    if (sourceLang)
-        params.set("source", sourceLang);
-    let res;
-    try {
-        res = await fetch(`https://translation.googleapis.com/language/translate/v2?${params.toString()}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            // Text goes in the body so long posts don't hit URL length limits.
-            body: new URLSearchParams({ q: text }).toString(),
-        });
-    }
-    catch (err) {
-        console.error("Google Translate network/request error:", err.message);
-        throw httpError("Translation service unavailable", 502);
-    }
-    const json = (await res.json().catch(() => ({})));
+async function fallbackGoogleTranslate(text, targetLang, sourceLang) {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sourceLang || "auto")}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url);
     if (!res.ok) {
-        const errorMsg = json.error?.message || "Translation failed";
-        console.error("Google Translate error:", res.status, errorMsg);
-        throw httpError(res.status === 403
-            ? "Translation API is blocked or disabled in Google Cloud Console. Enable 'Cloud Translation API' on your API key."
-            : `Translation failed: ${errorMsg}`, 502);
+        throw httpError(`Translation service unavailable: ${res.status}`, 502);
     }
-    const first = json.data?.translations?.[0];
-    const translatedText = first?.translatedText?.trim();
-    if (!translatedText)
-        throw httpError("Translation failed", 502);
+    const json = (await res.json());
+    const segments = Array.isArray(json?.[0]) ? json[0] : [];
+    const translatedText = segments
+        .map((seg) => Array.isArray(seg) && typeof seg[0] === "string" ? seg[0] : "")
+        .join("")
+        .trim();
+    const detectedSource = typeof json?.[2] === "string" ? json[2] : sourceLang || "en";
+    if (!translatedText) {
+        throw httpError("Translation returned empty result", 502);
+    }
     return {
         translatedText,
-        sourceLanguage: normalizeLanguage(first?.detectedSourceLanguage || sourceLang),
+        sourceLanguage: normalizeLanguage(detectedSource),
     };
+}
+/**
+ * Single Google Cloud Translation v2 call with automated fallback.
+ * When `sourceLang` is omitted Google auto-detects it.
+ */
+async function googleTranslate(text, targetLang, sourceLang) {
+    if (GOOGLE_TRANSLATE_API_KEY) {
+        const params = new URLSearchParams({
+            key: GOOGLE_TRANSLATE_API_KEY,
+            target: targetLang,
+            format: "text",
+        });
+        if (sourceLang)
+            params.set("source", sourceLang);
+        try {
+            const res = await fetch(`https://translation.googleapis.com/language/translate/v2?${params.toString()}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ q: text }).toString(),
+            });
+            if (res.ok) {
+                const json = (await res.json().catch(() => ({})));
+                const first = json.data?.translations?.[0];
+                const translatedText = first?.translatedText?.trim();
+                if (translatedText) {
+                    return {
+                        translatedText,
+                        sourceLanguage: normalizeLanguage(first?.detectedSourceLanguage || sourceLang),
+                    };
+                }
+            }
+            else {
+                console.warn("Google Translate Cloud API returned status:", res.status, "Falling back to public translator...");
+            }
+        }
+        catch (err) {
+            console.warn("Google Translate Cloud API request failed:", err?.message, "Falling back to public translator...");
+        }
+    }
+    return fallbackGoogleTranslate(text, targetLang, sourceLang);
 }
 /**
  * Pre-translate a post into TRANSLATION_TARGET_LANGUAGES at write time.
@@ -151,18 +166,23 @@ export async function translateDynamicContent(opts) {
     catch (err) {
         console.error("Translation cache read failed:", err.message);
     }
-    if (sourceLang === targetLang) {
-        return {
-            originalText: rawText,
-            translatedText: rawText,
-            targetLanguage: targetLang,
-            sourceLanguage: sourceLang,
-            cached: false,
-        };
+    let activeTargetLang = targetLang;
+    if (sourceLang && sourceLang === activeTargetLang) {
+        activeTargetLang = activeTargetLang === "es" ? "en" : "es";
     }
-    const result = await googleTranslate(rawText, targetLang, sourceLang);
-    // Same-language content: return the original untouched.
-    const translatedText = result.sourceLanguage === targetLang ? rawText : result.translatedText;
+    let result = await googleTranslate(rawText, activeTargetLang, sourceLang);
+    if (result.sourceLanguage === activeTargetLang) {
+        const alternateLang = activeTargetLang === "es" ? "en" : "es";
+        try {
+            const alt = await googleTranslate(rawText, alternateLang, result.sourceLanguage);
+            if (alt.translatedText && alt.translatedText !== rawText) {
+                result = alt;
+                activeTargetLang = alternateLang;
+            }
+        }
+        catch { }
+    }
+    const translatedText = result.translatedText || rawText;
     const value = { translatedText, sourceLanguage: result.sourceLanguage };
     remember(cacheKey, value);
     Translation.updateOne({ textHash, targetLanguage: targetLang }, { $set: { ...value }, $setOnInsert: { hits: 0 } }, { upsert: true }).catch((err) => console.error("Translation cache write failed:", err.message));

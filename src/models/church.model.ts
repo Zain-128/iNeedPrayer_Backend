@@ -20,6 +20,7 @@ const churchSchema = new mongoose.Schema(
     landmark: { type: String, default: "" },
     image: { type: String, default: "" },
     bannerImage: { type: String, default: "" },
+    images: { type: [String], default: [] },
     website: { type: String, default: "" },
     email: { type: String, default: "" },
     phone: { type: String, default: "" },

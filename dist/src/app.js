@@ -98,6 +98,7 @@ app.use(async (_req, _res, next) => {
     next();
 });
 app.use("/api/auth", authRoutes);
+app.use("/auth", authRoutes);
 app.use("/api/auth", socialAuthRoutes);
 app.use("/auth", socialAuthRoutes);
 app.use("/api/test", testRoutes);
@@ -120,6 +121,7 @@ app.use("/api/wallet", walletRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/translate", translateRoutes);
+app.use("/translate", translateRoutes);
 app.use("/api", translateRoutes);
 app.use("/api", socialRoutes);
 app.get("/health", (_req, res) => {

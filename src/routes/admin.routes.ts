@@ -79,9 +79,22 @@ router.get("/notifications", admin.listNotifications);
 router.post("/notifications", admin.broadcastNotification);
 router.delete("/notifications/:id", admin.deleteNotification);
 
-// Monetization stubs (dashboard pages exist; billing TBD)
-router.get("/subscriptions", admin.monetizationStub);
-router.get("/subscription-plans", admin.monetizationStub);
+// Monetization - Subscription Plans (Dashboard)
+router.get("/subscription-plans", admin.listSubscriptionPlans);
+router.post("/subscription-plans", admin.createSubscriptionPlan);
+router.get("/subscription-plans/:id", admin.getSubscriptionPlan);
+router.put("/subscription-plans/:id", admin.updateSubscriptionPlan);
+router.delete("/subscription-plans/:id", admin.deleteSubscriptionPlan);
+
+// Monetization - Subscriptions & Subscribers (Dashboard)
+router.get("/subscriptions", admin.listSubscriptions);
+router.get("/subscriptions/stats", admin.subscriptionStats);
+router.get("/subscriptions/:id", admin.getSubscription);
+router.post("/subscriptions", admin.createSubscription);
+router.put("/subscriptions/:id", admin.updateSubscription);
+router.post("/subscriptions/:id/cancel", admin.cancelSubscription);
+
+// Other monetization stubs
 router.get("/donations", admin.monetizationStub);
 router.get("/wallet/transactions", admin.monetizationStub);
 router.get("/wallet/summary", admin.monetizationStub);

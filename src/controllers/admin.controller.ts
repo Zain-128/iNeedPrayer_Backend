@@ -8,6 +8,7 @@ import * as adminGroups from "../services/admin/adminGroups.service.js";
 import * as adminContent from "../services/admin/adminContent.service.js";
 import * as adminReports from "../services/admin/adminReports.service.js";
 import * as adminNotifications from "../services/admin/adminNotifications.service.js";
+import * as adminMonetization from "../services/admin/adminMonetization.service.js";
 import { paramStr } from "../utils/routeParams.js";
 
 function handle(res: Response, err: unknown) {
@@ -577,7 +578,103 @@ export const deleteNotification = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Monetization stubs (UI exists; billing not integrated yet)
+// ── Monetization: Subscription Plans ────────────────
+export const listSubscriptionPlans = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(await adminMonetization.listSubscriptionPlans(q(req)));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const getSubscriptionPlan = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(await adminMonetization.getSubscriptionPlan(paramStr(req.params.id)));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const createSubscriptionPlan = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.status(201).json(await adminMonetization.createSubscriptionPlan(req.body ?? {}));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const updateSubscriptionPlan = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminMonetization.updateSubscriptionPlan(paramStr(req.params.id), req.body ?? {})
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const deleteSubscriptionPlan = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(await adminMonetization.deleteSubscriptionPlan(paramStr(req.params.id)));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+// ── Monetization: Subscriptions & Subscribers ────────
+export const listSubscriptions = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(await adminMonetization.listSubscriptions(q(req)));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const getSubscription = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(await adminMonetization.getSubscription(paramStr(req.params.id)));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const createSubscription = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.status(201).json(await adminMonetization.createSubscription(req.body ?? {}));
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const updateSubscription = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminMonetization.updateSubscription(paramStr(req.params.id), req.body ?? {})
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const cancelSubscription = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.json(
+      await adminMonetization.cancelSubscriptionAdmin(paramStr(req.params.id))
+    );
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+export const subscriptionStats = async (_req: AuthRequest, res: Response) => {
+  try {
+    return res.json(await adminMonetization.getSubscriptionStats());
+  } catch (err) {
+    return handle(res, err);
+  }
+};
+
+// Remaining Monetization stubs (donations, withdrawals, etc.)
 export const monetizationStub = async (_req: AuthRequest, res: Response) => {
   return res.json({
     data: [],

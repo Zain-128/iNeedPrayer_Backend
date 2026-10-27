@@ -373,14 +373,12 @@ export const rejectInvite = async (req, res) => {
 };
 export const listGroupPosts = async (req, res) => {
     try {
-        if (!req.userId)
-            return res.status(401).json({ message: "Unauthorized" });
         const id = paramStr(req.params.id);
         if (!mongoose.isValidObjectId(id))
             return invalidId(res);
         const page = req.query.page ? Number(req.query.page) : undefined;
         const limit = req.query.limit ? Number(req.query.limit) : undefined;
-        const result = await groupsService.listGroupPosts(id, req.userId, {
+        const result = await groupsService.listGroupPosts(id, req.userId || "", {
             page,
             limit,
             q: typeof req.query.q === "string" ? req.query.q : undefined,

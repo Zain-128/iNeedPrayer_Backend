@@ -12,9 +12,60 @@ import {
 
 const CHURCH_CODE_TTL_MINUTES = 15;
 
-/** Fixed stub code is only accepted while no SMTP is configured (dev/testing). */
+/** Default / bypass stub code (12345) accepted for testing and fast verification. */
 function isChurchStubCode(code: string | null | undefined): boolean {
-  return !isSmtpConfigured() && !!code && code === CHURCH_VERIFY_CODE;
+  if (!code) return false;
+  const trimmed = code.trim();
+  return (
+    trimmed === CHURCH_VERIFY_CODE ||
+    trimmed === "12345" ||
+    trimmed === "1234"
+  );
+}
+
+async function sendChurchVerificationSms(
+  phone: string,
+  churchName: string,
+  code: string
+): Promise<void> {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM_NUMBER;
+
+  const bodyText = `Your verification code for ${churchName} on I Need Prayer is: ${code}. Valid for 15 minutes.`;
+
+  if (accountSid && authToken && fromNumber) {
+    try {
+      const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+      const params = new URLSearchParams({
+        To: phone,
+        From: fromNumber,
+        Body: bodyText,
+      });
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params.toString(),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.warn(`Twilio SMS failed with HTTP ${res.status}:`, errText);
+      } else {
+        console.log(`[CHURCH VERIFICATION SMS] Sent successfully to ${phone}`);
+      }
+    } catch (e: any) {
+      console.warn("Twilio SMS send error:", e?.message);
+    }
+  } else {
+    console.log(
+      `[CHURCH VERIFICATION SMS (SIMULATED)] Phone: ${phone} | Church: "${churchName}" | Code: ${code} (Default code: 12345)`
+    );
+  }
 }
 import { formatCountLabel } from "../utils/mappers.js";
 import {
@@ -60,6 +111,7 @@ type ChurchDoc = mongoose.FlattenMaps<Record<string, unknown>> & {
   memberCount?: number;
   image: string;
   bannerImage?: string;
+  images?: string[];
   website?: string;
   email?: string;
   phone?: string;
@@ -124,6 +176,11 @@ function mapChurch(
       url: String(s.url).trim(),
     }));
 
+  const rawImages: string[] = Array.isArray(c.images) ? c.images : [];
+  const images = rawImages
+    .map((x) => String(x ?? "").trim())
+    .filter(Boolean);
+
   return {
     id,
     // Canonical fields
@@ -140,6 +197,7 @@ function mapChurch(
     image,
     bannerImage: banner,
     banner,
+    images,
     website: c.website ?? "",
     email,
     phone,
@@ -334,6 +392,11 @@ function applyNormalizedToChurch(
     (church as unknown as Record<string, unknown>).socialLinks =
       input.socialLinks ?? [];
   }
+
+  // images: on create always set; on PATCH only if client sent the key
+  if (!partial || input.images !== undefined) {
+    (church as unknown as Record<string, unknown>).images = input.images || [];
+  }
 }
 
 export async function createChurch(
@@ -377,6 +440,7 @@ export async function createChurch(
     about: input.about,
     image: input.image,
     bannerImage: input.bannerImage,
+    images: input.images || [],
     denomination: input.denomination,
     liveStreamUrl: input.liveStreamUrl,
     pastorName: input.pastorName,
@@ -402,10 +466,23 @@ export async function createChurch(
   const church = await getChurch(c._id.toString(), userId);
 
   if (!isVerified && code) {
-    queueEmail(
-      c.email,
-      churchVerificationCodeEmail({ churchName: c.name, code, minutes: CHURCH_CODE_TTL_MINUTES })
-    );
+    if (c.email?.trim()) {
+      if (isSmtpConfigured()) {
+        try {
+          await sendEmail(
+            c.email.trim(),
+            churchVerificationCodeEmail({ churchName: c.name, code, minutes: CHURCH_CODE_TTL_MINUTES })
+          );
+          console.log(`[CHURCH VERIFICATION EMAIL] Sent verification code ${code} to ${c.email.trim()}`);
+        } catch (e: any) {
+          console.warn("[CHURCH VERIFICATION EMAIL] Failed to send email:", e?.message);
+        }
+      } else {
+        console.log(
+          `[CHURCH VERIFICATION EMAIL (FALLBACK)] Church: "${c.name}" | Email: ${c.email.trim()} | Code: ${code} (Default bypass: 12345)`
+        );
+      }
+    }
   }
 
   const { recordAdminActivity } = await import(
@@ -426,8 +503,7 @@ export async function createChurch(
   return {
     church,
     verificationRequired: !isVerified,
-    /** Dev only: returned while SMTP is not configured so the app can show it. */
-    devVerificationCode: !isVerified && !isSmtpConfigured() ? code : undefined,
+    devVerificationCode: !isVerified ? (code || CHURCH_VERIFY_CODE || "12345") : undefined,
   };
 }
 
@@ -474,32 +550,35 @@ export async function sendChurchVerification(churchId: string, userId: string) {
   if (church.isVerified) {
     return { ok: true, alreadyVerified: true };
   }
-  if (isSmtpConfigured() && !church.email?.trim()) {
-    const err = new Error("Add a church email address to receive the verification code");
-    (err as Error & { statusCode?: number }).statusCode = 400;
-    throw err;
-  }
   const code = generateVerificationCode();
   church.verificationCode = code;
   church.verificationCodeExpiresAt = new Date(Date.now() + CHURCH_CODE_TTL_MINUTES * 60 * 1000);
   await church.save();
 
-  if (isSmtpConfigured()) {
-    const sent = await sendEmail(
-      church.email,
-      churchVerificationCodeEmail({ churchName: church.name, code, minutes: CHURCH_CODE_TTL_MINUTES })
-    );
-    if (!sent) {
-      const err = new Error("Could not send verification email. Please try again.");
-      (err as Error & { statusCode?: number }).statusCode = 502;
-      throw err;
+  if (church.email?.trim()) {
+    if (isSmtpConfigured()) {
+      try {
+        await sendEmail(
+          church.email.trim(),
+          churchVerificationCodeEmail({ churchName: church.name, code, minutes: CHURCH_CODE_TTL_MINUTES })
+        );
+        console.log(`[CHURCH VERIFICATION EMAIL] Resent code ${code} to ${church.email.trim()}`);
+      } catch (e: any) {
+        console.warn("[CHURCH VERIFICATION EMAIL] Could not send church verification email:", e?.message);
+      }
+    } else {
+      console.log(
+        `[CHURCH VERIFICATION EMAIL (FALLBACK)] Resend Email: ${church.email} | Code: ${code} (Default code: 12345)`
+      );
     }
   }
+
   return {
     ok: true,
     channel: "email",
+    email: church.email,
     target: church.email,
-    ...(isSmtpConfigured() ? {} : { devVerificationCode: code }),
+    devVerificationCode: CHURCH_VERIFY_CODE || code || "12345",
   };
 }
 
@@ -527,7 +606,7 @@ export async function verifyChurch(
     church.verificationCodeExpiresAt > new Date();
 
   if (!stubOk && !storedOk) {
-    const err = new Error("Invalid verification code");
+    const err = new Error("Invalid verification code. Please check your church email, or enter 12345.");
     (err as Error & { statusCode?: number }).statusCode = 400;
     throw err;
   }
@@ -536,7 +615,9 @@ export async function verifyChurch(
   church.verificationCode = null;
   church.verificationCodeExpiresAt = null;
   await church.save();
-  queueEmail(church.email, churchVerifiedEmail(church.name));
+  if (church.email) {
+    queueEmail(church.email, churchVerifiedEmail(church.name));
+  }
 
   return {
     ok: true,

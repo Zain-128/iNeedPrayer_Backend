@@ -53,36 +53,78 @@ export async function listSubscriptionPlans(query: Record<string, unknown>) {
   if (query.isActive === "true") filter.isActive = true;
   if (query.isActive === "false") filter.isActive = false;
 
+  if (typeof query.target === "string" && query.target !== "all" && query.target !== "All") {
+    filter.target = query.target;
+  }
+
   if (typeof query.search === "string" && query.search.trim()) {
     const rx = new RegExp(escapeRegex(query.search.trim()), "i");
     filter.$or = [{ name: rx }, { description: rx }];
   }
 
-  const [total, docs, activeCount] = await Promise.all([
+  const [total, docs, activeCount, indivCount, commCount, churchCount] = await Promise.all([
     SubscriptionPlan.countDocuments(filter),
-    SubscriptionPlan.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    SubscriptionPlan.find(filter).sort({ target: 1, priceCents: 1 }).skip(skip).limit(limit).lean(),
     SubscriptionPlan.countDocuments({ isActive: true }),
+    SubscriptionPlan.countDocuments({ target: "individual" }),
+    SubscriptionPlan.countDocuments({ target: "community" }),
+    SubscriptionPlan.countDocuments({ target: "church" }),
   ]);
 
   return {
     data: docs.map((p) => ({
       id: p._id.toString(),
       name: p.name,
+      target: (p as any).target || "individual",
+      tier: (p as any).tier || "starter",
+      badge: (p as any).badge || "",
       description: p.description ?? "",
       price: p.priceCents / 100,
       priceFormatted: formatMoney(p.priceCents),
       billingCycle: p.billingCycle,
       features: p.features ?? [],
+      limits: (p as any).limits || {},
       isActive: p.isActive,
       trialPeriod: p.trialPeriodDays ?? 0,
       subscribers: p.subscribersCount ?? 0,
+      appStoreProductId: (p as any).appStoreProductId || "",
+      googlePlayProductId: (p as any).googlePlayProductId || "",
       createdAt: formatDisplayDate(p.createdAt),
     })),
     meta: listMeta(page, limit, total),
     stats: {
       totalPlans: total,
       activePlans: activeCount,
+      individualPlans: indivCount,
+      communityPlans: commCount,
+      churchPlans: churchCount,
     },
+  };
+}
+
+export async function getSubscriptionPlan(id: string) {
+  if (!mongoose.isValidObjectId(id)) throw httpError("Invalid id", 400);
+  const p = await SubscriptionPlan.findById(id).lean();
+  if (!p) throw httpError("Subscription plan not found", 404);
+
+  return {
+    id: p._id.toString(),
+    name: p.name,
+    target: (p as any).target || "individual",
+    tier: (p as any).tier || "starter",
+    badge: (p as any).badge || "",
+    description: p.description ?? "",
+    price: p.priceCents / 100,
+    priceFormatted: formatMoney(p.priceCents),
+    billingCycle: p.billingCycle,
+    features: p.features ?? [],
+    limits: (p as any).limits || {},
+    isActive: p.isActive,
+    trialPeriod: p.trialPeriodDays ?? 0,
+    subscribers: p.subscribersCount ?? 0,
+    appStoreProductId: (p as any).appStoreProductId || "",
+    googlePlayProductId: (p as any).googlePlayProductId || "",
+    createdAt: formatDisplayDate(p.createdAt),
   };
 }
 
@@ -95,28 +137,27 @@ export async function createSubscriptionPlan(body: Record<string, unknown>) {
       ? Number(body.priceCents)
       : parseMoneyToCents(body.price);
 
+  const target = String(body.target ?? "individual").trim().toLowerCase();
+  const validTarget =
+    target === "church" || target === "community" ? target : "individual";
+
   const plan = await SubscriptionPlan.create({
     name,
     description: String(body.description ?? "").trim(),
+    target: validTarget,
+    tier: String(body.tier ?? "starter"),
+    badge: String(body.badge ?? ""),
     priceCents: Math.max(0, priceCents),
     billingCycle: (body.billingCycle as SubscriptionBillingCycle) ?? "Monthly",
     features: Array.isArray(body.features) ? body.features.map(String) : [],
+    limits: typeof body.limits === "object" && body.limits !== null ? body.limits : {},
     isActive: body.isActive !== false,
-    trialPeriodDays: Math.max(0, Number(body.trialPeriod) || 0),
+    trialPeriodDays: Math.max(0, Number(body.trialPeriod ?? body.trialPeriodDays) || 0),
+    appStoreProductId: String(body.appStoreProductId ?? ""),
+    googlePlayProductId: String(body.googlePlayProductId ?? ""),
   });
 
-  return {
-    id: plan._id.toString(),
-    name: plan.name,
-    description: plan.description,
-    price: plan.priceCents / 100,
-    billingCycle: plan.billingCycle,
-    features: plan.features,
-    isActive: plan.isActive,
-    trialPeriod: plan.trialPeriodDays,
-    subscribers: plan.subscribersCount,
-    createdAt: formatDisplayDate(plan.createdAt),
-  };
+  return getSubscriptionPlan(plan._id.toString());
 }
 
 export async function updateSubscriptionPlan(
@@ -131,6 +172,12 @@ export async function updateSubscriptionPlan(
   if (body.description !== undefined) {
     plan.description = String(body.description).trim();
   }
+  if (body.target !== undefined) {
+    const t = String(body.target).trim().toLowerCase();
+    (plan as any).target = t === "church" || t === "community" ? t : "individual";
+  }
+  if (body.tier !== undefined) (plan as any).tier = String(body.tier);
+  if (body.badge !== undefined) (plan as any).badge = String(body.badge);
   if (body.price !== undefined || body.priceCents !== undefined) {
     plan.priceCents =
       body.priceCents !== undefined
@@ -141,24 +188,22 @@ export async function updateSubscriptionPlan(
     plan.billingCycle = body.billingCycle as SubscriptionBillingCycle;
   }
   if (Array.isArray(body.features)) plan.features = body.features.map(String);
+  if (typeof body.limits === "object" && body.limits !== null) {
+    (plan as any).limits = body.limits;
+  }
   if (body.isActive !== undefined) plan.isActive = Boolean(body.isActive);
-  if (body.trialPeriod !== undefined) {
-    plan.trialPeriodDays = Math.max(0, Number(body.trialPeriod) || 0);
+  if (body.trialPeriod !== undefined || body.trialPeriodDays !== undefined) {
+    plan.trialPeriodDays = Math.max(0, Number(body.trialPeriod ?? body.trialPeriodDays) || 0);
+  }
+  if (body.appStoreProductId !== undefined) {
+    (plan as any).appStoreProductId = String(body.appStoreProductId);
+  }
+  if (body.googlePlayProductId !== undefined) {
+    (plan as any).googlePlayProductId = String(body.googlePlayProductId);
   }
 
   await plan.save();
-  return {
-    id: plan._id.toString(),
-    name: plan.name,
-    description: plan.description,
-    price: plan.priceCents / 100,
-    billingCycle: plan.billingCycle,
-    features: plan.features,
-    isActive: plan.isActive,
-    trialPeriod: plan.trialPeriodDays,
-    subscribers: plan.subscribersCount,
-    createdAt: formatDisplayDate(plan.createdAt),
-  };
+  return getSubscriptionPlan(id);
 }
 
 export async function deleteSubscriptionPlan(id: string) {
@@ -178,26 +223,32 @@ export async function deleteSubscriptionPlan(id: string) {
 // ── Subscriptions ────────────────────────────────────
 
 function mapSubscription(
-  s: {
-    _id: { toString(): string };
-    planName?: string;
-    amountCents?: number;
-    billing?: string;
-    startDate?: Date;
-    expiryDate?: Date | null;
-    autoRenew?: boolean;
-    paymentStatus?: string;
-    status?: string;
-    transactionId?: string;
-    createdAt?: Date;
-  },
-  user?: { name?: string; email?: string; avatar?: string } | null
+  s: any,
+  user?: { name?: string; email?: string; avatar?: string } | null,
+  church?: { _id?: any; name?: string; email?: string; image?: string } | null,
+  community?: { _id?: any; name?: string; image?: string } | null
 ) {
+  const target: string = s.target || "individual";
+  const targetDisplayName =
+    target === "church"
+      ? (church?.name || "Church")
+      : target === "community"
+      ? (community?.name || "Community")
+      : (user?.name || "Individual");
+
   return {
     id: s._id.toString(),
+    target,
+    targetDisplayName,
     name: user?.name ?? "",
     email: user?.email ?? "",
     avatar: user?.avatar ?? "",
+    church: church
+      ? { id: church._id?.toString(), name: church.name, email: church.email, image: church.image }
+      : null,
+    community: community
+      ? { id: community._id?.toString(), name: community.name, image: community.image }
+      : null,
     plan: s.planName ?? "Monthly",
     amount: formatMoney(s.amountCents ?? 0),
     amountCents: s.amountCents ?? 0,
@@ -205,6 +256,7 @@ function mapSubscription(
     startDate: formatDisplayDate(s.startDate),
     expiryDate: formatDisplayDate(s.expiryDate),
     autoRenew: Boolean(s.autoRenew),
+    cancelAtPeriodEnd: Boolean(s.cancelAtPeriodEnd),
     paymentStatus: s.paymentStatus ?? "Paid",
     status: s.status ?? "Active",
     transactionId: s.transactionId ?? "",
@@ -216,13 +268,16 @@ export async function listSubscriptions(query: Record<string, unknown>) {
   const { page, limit, skip } = parsePageLimit(query);
   const filter: Record<string, unknown> = {};
 
-  if (typeof query.status === "string" && query.status !== "All") {
+  if (typeof query.target === "string" && query.target !== "all" && query.target !== "All") {
+    filter.target = query.target;
+  }
+  if (typeof query.status === "string" && query.status !== "All" && query.status !== "all") {
     filter.status = query.status;
   }
-  if (typeof query.plan === "string" && query.plan !== "All") {
+  if (typeof query.plan === "string" && query.plan !== "All" && query.plan !== "all") {
     filter.planName = query.plan;
   }
-  if (typeof query.paymentStatus === "string" && query.paymentStatus !== "All") {
+  if (typeof query.paymentStatus === "string" && query.paymentStatus !== "All" && query.paymentStatus !== "all") {
     filter.paymentStatus = query.paymentStatus;
   }
   if (typeof query.search === "string" && query.search.trim()) {
@@ -240,6 +295,8 @@ export async function listSubscriptions(query: Record<string, unknown>) {
     UserSubscription.countDocuments(filter),
     UserSubscription.find(filter)
       .populate("user", "name email avatar")
+      .populate("church", "name email image")
+      .populate("community", "name image")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -247,7 +304,7 @@ export async function listSubscriptions(query: Record<string, unknown>) {
     UserSubscription.aggregate([
       {
         $group: {
-          _id: "$status",
+          _id: { status: "$status", target: "$target" },
           count: { $sum: 1 },
           revenue: { $sum: "$amountCents" },
         },
@@ -259,18 +316,37 @@ export async function listSubscriptions(query: Record<string, unknown>) {
   let expired = 0;
   let cancelled = 0;
   let revenueCents = 0;
+
+  const byTarget: Record<string, { total: number; active: number; revenueCents: number }> = {
+    individual: { total: 0, active: 0, revenueCents: 0 },
+    community: { total: 0, active: 0, revenueCents: 0 },
+    church: { total: 0, active: 0, revenueCents: 0 },
+  };
+
   for (const row of statsRows) {
-    revenueCents += row.revenue ?? 0;
-    if (row._id === "Active") active = row.count;
-    if (row._id === "Expired") expired = row.count;
-    if (row._id === "Cancelled") cancelled = row.count;
+    const status = row._id?.status;
+    const tgt = row._id?.target || "individual";
+    const count = row.count ?? 0;
+    const rev = row.revenue ?? 0;
+
+    revenueCents += rev;
+    if (status === "Active") active += count;
+    if (status === "Expired") expired += count;
+    if (status === "Cancelled") cancelled += count;
+
+    if (!byTarget[tgt]) byTarget[tgt] = { total: 0, active: 0, revenueCents: 0 };
+    byTarget[tgt].total += count;
+    if (status === "Active") byTarget[tgt].active += count;
+    byTarget[tgt].revenueCents += rev;
   }
 
   return {
     data: docs.map((s) =>
       mapSubscription(
         s,
-        s.user as { name?: string; email?: string; avatar?: string } | null
+        s.user as { name?: string; email?: string; avatar?: string } | null,
+        (s as any).church,
+        (s as any).community
       )
     ),
     meta: listMeta(page, limit, total),
@@ -281,6 +357,23 @@ export async function listSubscriptions(query: Record<string, unknown>) {
       cancelledSubscriptions: cancelled,
       totalRevenue: formatMoney(revenueCents),
       totalRevenueCents: revenueCents,
+      byTarget: {
+        individual: {
+          total: byTarget.individual.total,
+          active: byTarget.individual.active,
+          revenue: formatMoney(byTarget.individual.revenueCents),
+        },
+        community: {
+          total: byTarget.community.total,
+          active: byTarget.community.active,
+          revenue: formatMoney(byTarget.community.revenueCents),
+        },
+        church: {
+          total: byTarget.church.total,
+          active: byTarget.church.active,
+          revenue: formatMoney(byTarget.church.revenueCents),
+        },
+      },
     },
   };
 }
@@ -289,11 +382,15 @@ export async function getSubscription(id: string) {
   if (!mongoose.isValidObjectId(id)) throw httpError("Invalid id", 400);
   const s = await UserSubscription.findById(id)
     .populate("user", "name email avatar")
+    .populate("church", "name email image")
+    .populate("community", "name image")
     .lean();
   if (!s) throw httpError("Subscription not found", 404);
   return mapSubscription(
     s,
-    s.user as { name?: string; email?: string; avatar?: string } | null
+    s.user as { name?: string; email?: string; avatar?: string } | null,
+    (s as any).church,
+    (s as any).community
   );
 }
 
@@ -308,6 +405,7 @@ export async function createSubscription(body: Record<string, unknown>) {
   let planName = String(body.plan ?? body.planName ?? "Monthly");
   let amountCents = parseMoneyToCents(body.amount);
   let billing = String(body.billing ?? planName);
+  let target = String(body.target ?? "individual").trim().toLowerCase();
   let planId = null;
 
   if (body.planId && mongoose.isValidObjectId(String(body.planId))) {
@@ -317,14 +415,27 @@ export async function createSubscription(body: Record<string, unknown>) {
       planName = plan.name;
       amountCents = plan.priceCents;
       billing = plan.billingCycle;
-      plan.subscribersCount += 1;
+      target = plan.target || target;
+      plan.subscribersCount = (plan.subscribersCount ?? 0) + 1;
       await plan.save();
     }
   }
 
+  const validTarget =
+    target === "church" || target === "community" ? target : "individual";
+
   const txnId = String(body.transactionId ?? genTxnId("SUB"));
-  const sub = await UserSubscription.create({
+  const subData: any = {
     user: userId,
+    target: validTarget,
+    church:
+      body.churchId && mongoose.isValidObjectId(String(body.churchId))
+        ? String(body.churchId)
+        : null,
+    community:
+      body.communityId && mongoose.isValidObjectId(String(body.communityId))
+        ? String(body.communityId)
+        : null,
     plan: planId,
     planName,
     amountCents,
@@ -335,7 +446,8 @@ export async function createSubscription(body: Record<string, unknown>) {
     paymentStatus: (body.paymentStatus as SubscriptionPaymentStatus) ?? "Paid",
     status: (body.status as SubscriptionStatus) ?? "Active",
     transactionId: txnId,
-  });
+  };
+  const sub = (await UserSubscription.create(subData)) as any;
 
   await PlatformTransaction.create({
     user: userId,
@@ -347,8 +459,8 @@ export async function createSubscription(body: Record<string, unknown>) {
     method: String(body.paymentMethod ?? "Card"),
     transactionId: txnId,
     status: sub.paymentStatus === "Paid" ? "Completed" : "Pending",
-    description: `${planName} subscription`,
-    metadata: { plan: planName, duration: billing },
+    description: `${planName} (${validTarget}) subscription`,
+    metadata: { plan: planName, duration: billing, target: validTarget },
     occurredAt: sub.startDate,
   });
 
@@ -366,6 +478,10 @@ export async function updateSubscription(
   if (body.plan !== undefined || body.planName !== undefined) {
     sub.planName = String(body.plan ?? body.planName);
   }
+  if (body.target !== undefined) {
+    const t = String(body.target).trim().toLowerCase();
+    (sub as any).target = t === "church" || t === "community" ? t : "individual";
+  }
   if (body.amount !== undefined) {
     sub.amountCents = parseMoneyToCents(body.amount);
   }
@@ -381,6 +497,89 @@ export async function updateSubscription(
 
   await sub.save();
   return getSubscription(id);
+}
+
+export async function cancelSubscriptionAdmin(id: string) {
+  if (!mongoose.isValidObjectId(id)) throw httpError("Invalid id", 400);
+  const sub = await UserSubscription.findById(id);
+  if (!sub) throw httpError("Subscription not found", 404);
+
+  sub.status = "Cancelled";
+  sub.autoRenew = false;
+  sub.cancelAtPeriodEnd = true;
+  await sub.save();
+
+  if (sub.plan) {
+    await SubscriptionPlan.findByIdAndUpdate(sub.plan, {
+      $inc: { subscribersCount: -1 },
+    });
+  }
+
+  return getSubscription(id);
+}
+
+export async function getSubscriptionStats() {
+  const [total, active, expired, cancelled, statsRows] = await Promise.all([
+    UserSubscription.countDocuments(),
+    UserSubscription.countDocuments({ status: "Active" }),
+    UserSubscription.countDocuments({ status: "Expired" }),
+    UserSubscription.countDocuments({ status: "Cancelled" }),
+    UserSubscription.aggregate([
+      {
+        $group: {
+          _id: { status: "$status", target: "$target" },
+          count: { $sum: 1 },
+          revenue: { $sum: "$amountCents" },
+        },
+      },
+    ]),
+  ]);
+
+  let totalRevenueCents = 0;
+  const byTarget: Record<string, { total: number; active: number; revenueCents: number }> = {
+    individual: { total: 0, active: 0, revenueCents: 0 },
+    community: { total: 0, active: 0, revenueCents: 0 },
+    church: { total: 0, active: 0, revenueCents: 0 },
+  };
+
+  for (const row of statsRows) {
+    const status = row._id?.status;
+    const tgt = row._id?.target || "individual";
+    const count = row.count ?? 0;
+    const rev = row.revenue ?? 0;
+
+    totalRevenueCents += rev;
+    if (!byTarget[tgt]) byTarget[tgt] = { total: 0, active: 0, revenueCents: 0 };
+    byTarget[tgt].total += count;
+    if (status === "Active") byTarget[tgt].active += count;
+    byTarget[tgt].revenueCents += rev;
+  }
+
+  return {
+    totalSubscriptions: total,
+    activeSubscriptions: active,
+    expiredSubscriptions: expired,
+    cancelledSubscriptions: cancelled,
+    totalRevenue: formatMoney(totalRevenueCents),
+    totalRevenueCents,
+    breakdown: {
+      individual: {
+        total: byTarget.individual.total,
+        active: byTarget.individual.active,
+        revenue: formatMoney(byTarget.individual.revenueCents),
+      },
+      community: {
+        total: byTarget.community.total,
+        active: byTarget.community.active,
+        revenue: formatMoney(byTarget.community.revenueCents),
+      },
+      church: {
+        total: byTarget.church.total,
+        active: byTarget.church.active,
+        revenue: formatMoney(byTarget.church.revenueCents),
+      },
+    },
+  };
 }
 
 export async function deleteSubscription(id: string) {

@@ -30,6 +30,24 @@ export function normalizeChurchInput(body) {
     const city = (b.city ?? "").trim();
     const streetAddress = (b.streetAddress ?? "").trim();
     const landmark = (b.landmark ?? "").trim();
+    let images = undefined;
+    if (Array.isArray(body?.images)) {
+        images = body.images.map((x) => String(x ?? "").trim()).filter(Boolean);
+    }
+    else if (typeof body?.images === "string" && body.images.trim()) {
+        try {
+            const parsed = JSON.parse(body.images);
+            if (Array.isArray(parsed)) {
+                images = parsed.map((x) => String(x ?? "").trim()).filter(Boolean);
+            }
+            else {
+                images = [body.images.trim()];
+            }
+        }
+        catch {
+            images = body.images.split(",").map((x) => x.trim()).filter(Boolean);
+        }
+    }
     return {
         name: (b.name ?? b.churchName ?? "").trim(),
         website: (b.website ?? "").trim(),
@@ -61,6 +79,7 @@ export function normalizeChurchInput(body) {
         denomination: (b.denomination ?? "").trim(),
         liveStreamUrl: (b.liveStreamUrl ?? "").trim(),
         pastorName: (b.pastorName ?? b.pastorOrLeaderName ?? "").trim(),
+        images,
         socialLinks: Array.isArray(body?.socialLinks)
             ? body.socialLinks
                 .filter((s) => s && (s.platform || s.url))

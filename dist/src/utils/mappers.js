@@ -79,6 +79,41 @@ export function mapPost(post, opts) {
                 : ""),
         }
         : undefined;
+    const rawImages = Array.isArray(post.images)
+        ? post.images
+        : [];
+    const normalizedImages = rawImages
+        .map(normalizeMediaUrl)
+        .filter(Boolean);
+    const primaryImage = normalizeMediaUrl(post.image ?? "") || normalizedImages[0] || "";
+    if (primaryImage && !normalizedImages.includes(primaryImage)) {
+        normalizedImages.unshift(primaryImage);
+    }
+    const rawVideos = Array.isArray(post.videos)
+        ? post.videos
+        : [];
+    const normalizedVideos = rawVideos
+        .map(normalizeMediaUrl)
+        .filter(Boolean);
+    const primaryVideo = normalizeMediaUrl(post.video ?? "") || normalizedVideos[0] || "";
+    if (primaryVideo && !normalizedVideos.includes(primaryVideo)) {
+        normalizedVideos.unshift(primaryVideo);
+    }
+    const rawThumbnail = post.videoThumbnail;
+    const videoThumbnail = typeof rawThumbnail === "string" && rawThumbnail.trim()
+        ? normalizeMediaUrl(rawThumbnail.trim())
+        : undefined;
+    const media = [
+        ...normalizedImages.map((url) => ({
+            type: "image",
+            url,
+        })),
+        ...normalizedVideos.map((url) => ({
+            type: "video",
+            url,
+            ...(videoThumbnail ? { thumbnail: videoThumbnail } : {}),
+        })),
+    ];
     return {
         id: post._id.toString(),
         author: mapAuthor(post.author),
@@ -89,7 +124,12 @@ export function mapPost(post, opts) {
         ...(translations && Object.keys(translations).length
             ? { translations }
             : {}),
-        image: normalizeMediaUrl(post.image ?? ""),
+        image: primaryImage,
+        images: normalizedImages,
+        video: primaryVideo,
+        videos: normalizedVideos,
+        videoThumbnail: videoThumbnail ?? "",
+        media,
         mode: post.mode ?? "prayer",
         ...(group ? { group } : {}),
         ...(groupId ? { groupId } : {}),

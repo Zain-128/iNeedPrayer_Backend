@@ -18,6 +18,7 @@ export type NormalizedChurchInput = {
   denomination: string;
   liveStreamUrl: string;
   pastorName: string;
+  images?: string[];
   socialLinks: Array<{ platform: string; url: string }>;
   socialLinksProvided: boolean;
 };
@@ -69,6 +70,22 @@ export function normalizeChurchInput(
   const streetAddress = (b.streetAddress ?? "").trim();
   const landmark = (b.landmark ?? "").trim();
 
+  let images: string[] | undefined = undefined;
+  if (Array.isArray(body?.images)) {
+    images = (body!.images as any[]).map((x) => String(x ?? "").trim()).filter(Boolean);
+  } else if (typeof body?.images === "string" && (body.images as string).trim()) {
+    try {
+      const parsed = JSON.parse(body.images as string);
+      if (Array.isArray(parsed)) {
+        images = parsed.map((x) => String(x ?? "").trim()).filter(Boolean);
+      } else {
+        images = [(body.images as string).trim()];
+      }
+    } catch {
+      images = (body.images as string).split(",").map((x) => x.trim()).filter(Boolean);
+    }
+  }
+
   return {
     name: (b.name ?? b.churchName ?? "").trim(),
     website: (b.website ?? "").trim(),
@@ -100,6 +117,7 @@ export function normalizeChurchInput(
     denomination: (b.denomination ?? "").trim(),
     liveStreamUrl: (b.liveStreamUrl ?? "").trim(),
     pastorName: (b.pastorName ?? b.pastorOrLeaderName ?? "").trim(),
+    images,
     socialLinks: Array.isArray(body?.socialLinks)
       ? (body!.socialLinks as Array<any>)
           .filter((s) => s && (s.platform || s.url))

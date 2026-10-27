@@ -45,6 +45,10 @@ export function mapPost(
     sourceLanguage?: string;
     translations?: Map<string, string> | Record<string, string>;
     image?: string;
+    images?: string[];
+    video?: string;
+    videos?: string[];
+    videoThumbnail?: string;
     mode?: string;
     praysCount: number;
     praisesCount: number;
@@ -149,6 +153,52 @@ export function mapPost(
         }
       : undefined;
 
+  const rawImages: string[] = Array.isArray((post as any).images)
+    ? (post as any).images
+    : [];
+  const normalizedImages = rawImages
+    .map(normalizeMediaUrl)
+    .filter(Boolean);
+
+  const primaryImage =
+    normalizeMediaUrl(post.image ?? "") || normalizedImages[0] || "";
+
+  if (primaryImage && !normalizedImages.includes(primaryImage)) {
+    normalizedImages.unshift(primaryImage);
+  }
+
+  const rawVideos: string[] = Array.isArray((post as any).videos)
+    ? (post as any).videos
+    : [];
+  const normalizedVideos = rawVideos
+    .map(normalizeMediaUrl)
+    .filter(Boolean);
+
+  const primaryVideo =
+    normalizeMediaUrl((post as any).video ?? "") || normalizedVideos[0] || "";
+
+  if (primaryVideo && !normalizedVideos.includes(primaryVideo)) {
+    normalizedVideos.unshift(primaryVideo);
+  }
+
+  const rawThumbnail = (post as any).videoThumbnail;
+  const videoThumbnail =
+    typeof rawThumbnail === "string" && rawThumbnail.trim()
+      ? normalizeMediaUrl(rawThumbnail.trim())
+      : undefined;
+
+  const media = [
+    ...normalizedImages.map((url) => ({
+      type: "image" as const,
+      url,
+    })),
+    ...normalizedVideos.map((url) => ({
+      type: "video" as const,
+      url,
+      ...(videoThumbnail ? { thumbnail: videoThumbnail } : {}),
+    })),
+  ];
+
   return {
     id: post._id.toString(),
     author: mapAuthor(post.author),
@@ -159,7 +209,12 @@ export function mapPost(
     ...(translations && Object.keys(translations).length
       ? { translations }
       : {}),
-    image: normalizeMediaUrl(post.image ?? ""),
+    image: primaryImage,
+    images: normalizedImages,
+    video: primaryVideo,
+    videos: normalizedVideos,
+    videoThumbnail: videoThumbnail ?? "",
+    media,
     mode: post.mode ?? "prayer",
     ...(group ? { group } : {}),
     ...(groupId ? { groupId } : {}),

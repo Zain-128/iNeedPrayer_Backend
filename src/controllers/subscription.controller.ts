@@ -3,13 +3,17 @@ import { AuthRequest } from "../middleware/auth.middleware.js";
 import * as subscriptionService from "../services/subscription.service.js";
 import * as stripeService from "../services/stripe.service.js";
 
-export const getPlans = async (_req: AuthRequest, res: Response) => {
+export const getPlans = async (req: AuthRequest, res: Response) => {
   try {
-    const plans = await subscriptionService.getActiveSubscriptionPlans();
+    const rawTarget =
+      (req.query.target as string) || (req.params.target as string) || null;
+    const result = await subscriptionService.getActiveSubscriptionPlans(rawTarget);
     return res.json({
       success: true,
-      plans,
-      data: plans,
+      target: rawTarget ? subscriptionService.normalizeTarget(rawTarget) : "all",
+      plans: result.plans,
+      data: result.plans,
+      categorized: result.categorized,
     });
   } catch (err) {
     const e = err as Error & { statusCode?: number };
@@ -20,7 +24,15 @@ export const getPlans = async (_req: AuthRequest, res: Response) => {
 export const getStatus = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
-    const subscription = await subscriptionService.getSubscriptionStatus(req.userId);
+    const { target, churchId, communityId } = (req.query ?? {}) as {
+      target?: string;
+      churchId?: string;
+      communityId?: string;
+    };
+    const subscription = await subscriptionService.getSubscriptionStatus(
+      req.userId,
+      { target, churchId, communityId }
+    );
     return res.json({ subscription });
   } catch (err) {
     const e = err as Error & { statusCode?: number };
@@ -31,12 +43,15 @@ export const getStatus = async (req: AuthRequest, res: Response) => {
 export const subscribe = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
-    const { planId } = req.body ?? {};
+    const { planId, target, churchId, communityId } = req.body ?? {};
     if (!planId) {
       return res.status(400).json({ message: "planId is required" });
     }
-    const checkout = await stripeService.createSubscriptionCheckout(req.userId, planId);
-    return res.json(checkout);
+    const result = await subscriptionService.createOrCheckoutSubscription(
+      req.userId,
+      { planId, target, churchId, communityId }
+    );
+    return res.json(result);
   } catch (err) {
     const e = err as Error & { statusCode?: number };
     return res.status(e.statusCode ?? 500).json({ message: e.message });
@@ -46,7 +61,21 @@ export const subscribe = async (req: AuthRequest, res: Response) => {
 export const cancel = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
-    const result = await stripeService.cancelSubscription(req.userId);
+    const { subscriptionId, target, churchId, communityId } = {
+      ...(req.query as Record<string, unknown>),
+      ...(req.body as Record<string, unknown>),
+    } as {
+      subscriptionId?: string;
+      target?: string;
+      churchId?: string;
+      communityId?: string;
+    };
+    const result = await subscriptionService.cancelSubscription(req.userId, {
+      subscriptionId,
+      target,
+      churchId,
+      communityId,
+    });
     return res.json(result);
   } catch (err) {
     const e = err as Error & { statusCode?: number };
