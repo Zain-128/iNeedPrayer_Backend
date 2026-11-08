@@ -5,7 +5,22 @@ import * as chatController from "../controllers/chat.controller.js";
 const router = Router();
 
 // Lists & Stats (must come before /:id)
+router.get("/requests/incoming", protect, chatController.listIncomingRequests);
+router.get("/requests/outgoing", protect, chatController.listOutgoingRequests);
 router.get("/requests", protect, chatController.listRequests);
+
+router.get("/message-requests/incoming", protect, chatController.listIncomingRequests);
+router.get("/message-requests/outgoing", protect, chatController.listOutgoingRequests);
+router.get("/message-requests", protect, chatController.listRequests);
+
+router.post("/requests", protect, chatController.createRequest);
+router.post("/message-requests", protect, chatController.createRequest);
+
+router.post("/requests/:id/accept", protect, chatController.acceptRequest);
+router.post("/requests/:id/decline", protect, chatController.declineRequest);
+router.post("/message-requests/:id/accept", protect, chatController.acceptRequest);
+router.post("/message-requests/:id/decline", protect, chatController.declineRequest);
+
 router.get("/archived", protect, chatController.listArchived);
 router.get("/unread-count", protect, chatController.getUnreadCount);
 router.get("/", protect, chatController.listConversations);

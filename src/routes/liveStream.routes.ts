@@ -5,10 +5,20 @@ import * as liveStreamController from "../controllers/liveStream.controller.js";
 
 const router = Router();
 
+// Shared Live Stream Settings
+router.get("/settings", protect, liveStreamController.getSettings);
+router.patch("/settings", protect, liveStreamController.updateSettings);
+
 router.get(
   "/:scope/:entityId/status",
   optionalAuth,
   liveStreamController.getLiveStatus
+);
+
+router.get(
+  "/:scope/:entityId/replays",
+  optionalAuth,
+  liveStreamController.getLiveReplays
 );
 
 router.post(
@@ -42,5 +52,6 @@ router.post(
 );
 
 router.get("/sessions/:sessionId", optionalAuth, liveStreamController.getSession);
+router.get("/sessions/:sessionId/comments", optionalAuth, liveStreamController.getComments);
 
 export default router;

@@ -104,7 +104,7 @@ Same shape as user search / author, plus follow flags for the Search people tab.
 
 ### Post (`posts[]`)
 
-Same keys as `GET /api/posts`.
+Same keys as `GET /api/posts` and `GET /api/posts/:id`.
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -115,7 +115,12 @@ Same keys as `GET /api/posts`.
 | `originalText` | string | Original post text |
 | `sourceLanguage` | string | e.g. `"en"` |
 | `translations` | object | Optional `{ "es": "...", "ur": "..." }` |
-| `image` | string | Image URL (may be `""`) |
+| `image` | string | Primary image URL (may be `""`) |
+| `images` | string[] | Array of all image URLs for multi-image carousel / grid |
+| `video` | string | Primary video URL |
+| `videos` | string[] | Array of video URLs |
+| `videoThumbnail` | string | Video thumbnail image URL |
+| `media` | object[] | Array of media objects: `[{ "type": "image" \| "video", "url": "...", "thumbnail"?: "..." }]` |
 | `mode` | string | `"prayer"` \| `"praise"` |
 | `group` | object | Present only if posted in a group — `{ id, name, image, privacy }` |
 | `groupId` | string | Same as `group.id` (kept for backward compatibility) |
@@ -147,7 +152,29 @@ Same keys as `GET /api/posts`.
   "text": "Please pray for healing and grace.",
   "originalText": "Please pray for healing and grace.",
   "sourceLanguage": "en",
-  "image": "",
+  "image": "https://cdn.example.com/uploads/prayer-pic-1.jpg",
+  "images": [
+    "https://cdn.example.com/uploads/prayer-pic-1.jpg",
+    "https://cdn.example.com/uploads/prayer-pic-2.jpg",
+    "https://cdn.example.com/uploads/prayer-pic-3.jpg"
+  ],
+  "video": "",
+  "videos": [],
+  "videoThumbnail": "",
+  "media": [
+    {
+      "type": "image",
+      "url": "https://cdn.example.com/uploads/prayer-pic-1.jpg"
+    },
+    {
+      "type": "image",
+      "url": "https://cdn.example.com/uploads/prayer-pic-2.jpg"
+    },
+    {
+      "type": "image",
+      "url": "https://cdn.example.com/uploads/prayer-pic-3.jpg"
+    }
+  ],
   "mode": "prayer",
   "stats": {
     "prays": 12,

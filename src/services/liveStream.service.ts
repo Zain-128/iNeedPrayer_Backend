@@ -16,6 +16,11 @@ import {
 } from "./agora.service.js";
 import { getIo } from "../socket/ioSingleton.js";
 import { notifyLiveSessionEnded } from "../socket/live.socket.js";
+import {
+  tryStartCloudRecording,
+  tryStopCloudRecording,
+} from "./agoraRecording.service.js";
+import { LiveStreamSettings } from "../models/liveStreamSettings.model.js";
 
 export type LiveScope = "church" | "group";
 
@@ -90,10 +95,14 @@ function mapSession(
     viewerCount: session.viewerCount,
     likeCount: session.likeCount ?? 0,
     hostUserId: session.hostUserId.toString(),
+    hostUid: uidFromUserId(session.hostUserId.toString()),
     hostName: host?.name ?? "Host",
     hostAvatar: host?.avatar ?? "",
     startedAt: session.startedAt,
     endedAt: session.endedAt ?? null,
+    durationSeconds: session.durationSeconds ?? 0,
+    replayUrl: session.replayUrl ?? null,
+    recordingStatus: session.recordingStatus ?? "none",
   };
 }
 
@@ -150,10 +159,21 @@ async function endSessionRecord(
 ) {
   session.status = "ended";
   session.endedAt = new Date();
+  if (session.startedAt) {
+    session.durationSeconds = Math.max(
+      0,
+      Math.round((session.endedAt.getTime() - new Date(session.startedAt).getTime()) / 1000)
+    );
+  }
   session.endedBy = opts.endedBy
     ? new mongoose.Types.ObjectId(opts.endedBy)
     : null;
   await session.save();
+
+  // Stop cloud recording asynchronously if active
+  tryStopCloudRecording(session).catch((err) => {
+    console.warn("[liveStream] tryStopCloudRecording error:", err);
+  });
 
   const sessionId = session._id.toString();
   markSessionInactive(sessionId);
@@ -215,15 +235,24 @@ export async function recordHostHeartbeat(opts: {
 
 /** Single DB round-trip for socket heartbeats (host already verified at stream start). */
 export async function touchHostHeartbeat(opts: {
-  scope: LiveScope;
-  entityId: string;
+  scope?: LiveScope;
+  entityId?: string;
+  sessionId?: string;
   userId: string;
 }) {
-  const { scope, entityId, userId } = opts;
-  const filter =
-    scope === "church"
-      ? { churchId: entityId, status: "live" as const, hostUserId: userId }
-      : { groupId: entityId, status: "live" as const, hostUserId: userId };
+  const { scope, entityId, sessionId, userId } = opts;
+  let filter: Record<string, unknown>;
+
+  if (sessionId && mongoose.isValidObjectId(sessionId)) {
+    filter = { _id: sessionId, status: "live" as const, hostUserId: userId };
+  } else if (scope && entityId) {
+    filter =
+      scope === "church"
+        ? { churchId: entityId, status: "live" as const, hostUserId: userId }
+        : { groupId: entityId, status: "live" as const, hostUserId: userId };
+  } else {
+    throw httpError("Invalid heartbeat parameters", 400);
+  }
 
   const session = await LiveStreamSession.findOneAndUpdate(
     filter,
@@ -233,9 +262,9 @@ export async function touchHostHeartbeat(opts: {
 
   if (!session) throw httpError("No active live stream", 404);
 
-  const sessionId = session._id.toString();
-  markSessionActive(sessionId);
-  return { ok: true as const, sessionId };
+  const finalSessionId = session._id.toString();
+  markSessionActive(finalSessionId);
+  return { ok: true as const, sessionId: finalSessionId };
 }
 
 /** Lightweight live check for socket join (avoids loading host profile). */
@@ -356,6 +385,22 @@ export async function startLiveStream(opts: {
 
   markSessionActive(session._id.toString());
 
+  // Check if replay recording is enabled in settings (defaults to true)
+  try {
+    const settings = await LiveStreamSettings.findOne({
+      sourceType: scope,
+      sourceId: new mongoose.Types.ObjectId(entityId),
+    }).lean();
+    const replayEnabled = settings ? settings.replayEnabled : true;
+    if (replayEnabled) {
+      tryStartCloudRecording(session).catch((err) => {
+        console.warn("[liveStream] tryStartCloudRecording error:", err);
+      });
+    }
+  } catch (err) {
+    console.warn("[liveStream] Error checking replay settings:", err);
+  }
+
   const host = await loadHost(userId);
   const mapped = mapSession(
     session as ILiveStreamSession & { _id: mongoose.Types.ObjectId },
@@ -410,9 +455,18 @@ export async function joinLiveStream(opts: {
   const session = await findActiveSession(scope, entityId);
   if (!session) throw httpError("No live stream is active", 404);
 
+  const isHost = session.hostUserId.toString() === userId;
+  const role: AgoraRole = isHost ? "publisher" : "subscriber";
+
+  if (isHost) {
+    session.lastHeartbeatAt = new Date();
+    await session.save();
+    markSessionActive(session._id.toString());
+  }
+
   const host = await loadHost(session.hostUserId.toString());
   const uid = uidFromUserId(userId);
-  const tokenData = buildRtcToken(session.channelName, uid, "subscriber");
+  const tokenData = buildRtcToken(session.channelName, uid, role);
 
   return {
     ...mapSession(
@@ -420,7 +474,7 @@ export async function joinLiveStream(opts: {
       host
     ),
     ...tokenData,
-    role: "subscriber" as const,
+    role,
   };
 }
 
@@ -506,4 +560,80 @@ export function flushPendingViewerCount(sessionId: string) {
   return LiveStreamSession.findByIdAndUpdate(sessionId, {
     viewerCount: Math.max(0, count),
   });
+}
+
+export async function getLiveReplays(opts: {
+  scope: LiveScope;
+  entityId: string;
+  page?: number;
+  limit?: number;
+}) {
+  const { scope, entityId } = opts;
+  const page = Math.max(1, opts.page ?? 1);
+  const limit = Math.min(50, Math.max(1, opts.limit ?? 20));
+  const skip = (page - 1) * limit;
+
+  // Check if replay is enabled in settings
+  const settings = await LiveStreamSettings.findOne({
+    sourceType: scope,
+    sourceId: new mongoose.Types.ObjectId(entityId),
+  }).lean();
+
+  if (settings && settings.replayEnabled === false) {
+    return {
+      replays: [],
+      pagination: {
+        total: 0,
+        page,
+        limit,
+        totalPages: 0,
+      },
+    };
+  }
+
+  const filter: Record<string, unknown> = {
+    status: "ended",
+    ...(scope === "church"
+      ? { churchId: new mongoose.Types.ObjectId(entityId) }
+      : { groupId: new mongoose.Types.ObjectId(entityId) }),
+  };
+
+  const [total, sessions] = await Promise.all([
+    LiveStreamSession.countDocuments(filter),
+    LiveStreamSession.find(filter)
+      .sort({ startedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("hostUserId", "name avatar")
+      .lean(),
+  ]);
+
+  const replays = sessions.map((s: any) => ({
+    sessionId: s._id.toString(),
+    churchId: s.churchId?.toString() ?? null,
+    groupId: s.groupId?.toString() ?? null,
+    channelName: s.channelName,
+    title: s.title,
+    status: s.status,
+    viewerCount: s.viewerCount ?? 0,
+    likeCount: s.likeCount ?? 0,
+    hostUserId: s.hostUserId?._id?.toString() ?? s.hostUserId?.toString() ?? "",
+    hostName: s.hostUserId?.name ?? "Host",
+    hostAvatar: s.hostUserId?.avatar ?? "",
+    startedAt: s.startedAt,
+    endedAt: s.endedAt ?? null,
+    durationSeconds: s.durationSeconds ?? 0,
+    replayUrl: s.replayUrl ?? null,
+    recordingStatus: s.recordingStatus ?? "none",
+  }));
+
+  return {
+    replays,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+  };
 }

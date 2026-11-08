@@ -15,6 +15,11 @@ export interface ILiveStreamSession {
   startedAt: Date;
   endedAt?: Date | null;
   endedBy?: mongoose.Types.ObjectId | null;
+  recordingResourceId?: string | null;
+  recordingSid?: string | null;
+  recordingStatus?: "none" | "acquiring" | "recording" | "stopped" | "failed" | null;
+  replayUrl?: string | null;
+  durationSeconds?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,6 +61,15 @@ const liveStreamSessionSchema = new mongoose.Schema<ILiveStreamSession>(
       ref: "User",
       default: null,
     },
+    recordingResourceId: { type: String, default: null },
+    recordingSid: { type: String, default: null },
+    recordingStatus: {
+      type: String,
+      enum: ["none", "acquiring", "recording", "stopped", "failed"],
+      default: "none",
+    },
+    replayUrl: { type: String, default: null },
+    durationSeconds: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

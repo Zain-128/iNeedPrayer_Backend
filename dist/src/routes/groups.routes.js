@@ -6,6 +6,8 @@ const router = Router();
 // Discovery & Lists
 router.get("/discover", optionalAuth, groupsController.discoverGroups);
 router.get("/mine", protect, groupsController.listMyGroups);
+router.get("/join-requests/sent", protect, groupsController.listSentJoinRequests);
+router.get("/invites/received", protect, groupsController.listReceivedInvites);
 router.get("/", optionalAuth, groupsController.listGroups);
 router.post("/", protect, groupsController.createGroup);
 // Detail & Settings
@@ -24,9 +26,14 @@ router.post("/:id/unmute", protect, groupsController.unmuteGroup);
 router.get("/:id/posts", optionalAuth, groupsController.listGroupPosts);
 // Join Requests
 router.get("/:id/pending-join-requests", protect, groupsController.listPendingJoinRequests);
+router.delete("/:id/join-request", protect, groupsController.cancelJoinRequest);
+router.delete("/join-requests/:requestId", protect, groupsController.cancelJoinRequest);
 router.patch("/:id/join-requests/:userId", protect, groupsController.manageJoinRequest);
 router.post("/:id/join-requests/:userId/approve", protect, groupsController.approveJoinRequest);
 router.post("/:id/join-requests/:userId/reject", protect, groupsController.rejectJoinRequest);
+// Live Stream Settings
+router.get("/:id/live-settings", protect, groupsController.getLiveSettings);
+router.patch("/:id/live-settings", protect, groupsController.updateLiveSettings);
 // Invitations (Friends Only)
 router.get("/:id/invite-candidates", protect, groupsController.listInviteCandidates);
 router.post("/:id/invite", protect, groupsController.inviteGroup);

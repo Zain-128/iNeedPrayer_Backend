@@ -4,6 +4,7 @@ import { Post } from "../models/post.model.js";
 import { Group } from "../models/group.model.js";
 import { Church } from "../models/church.model.js";
 import { mapPost, mapAuthor } from "../utils/mappers.js";
+import { excludedAuthorIds, reactionFlags } from "./posts.service.js";
 
 function escapeRegex(text: string): string {
   return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
@@ -26,7 +27,9 @@ export async function searchAll(params: {
 
   if (!q) {
     return {
+      q: "",
       query: "",
+      type: typeFilter,
       counts: {
         posts: 0,
         prayers: 0,
@@ -36,6 +39,10 @@ export async function searchAll(params: {
         churches: 0,
         total: 0,
       },
+      posts: [],
+      people: [],
+      groups: [],
+      churches: [],
       results: {
         posts: [],
         people: [],
@@ -44,12 +51,17 @@ export async function searchAll(params: {
       },
       page,
       limit,
+      total: 0,
+      totalPages: 1,
     };
   }
 
   const rx = new RegExp(escapeRegex(q), "i");
   const isValidId = mongoose.isValidObjectId(q);
   const idFilter = isValidId ? { _id: new mongoose.Types.ObjectId(q) } : null;
+
+  // Blocked / excluded users
+  const exclude = await excludedAuthorIds(params.currentUserId);
 
   // Conditions
   const userCond: Record<string, unknown>[] = [
@@ -76,14 +88,11 @@ export async function searchAll(params: {
   ];
   if (idFilter) churchCond.push(idFilter);
 
-  const postCondText: Record<string, unknown>[] = [{ text: rx }];
-  if (idFilter) postCondText.push(idFilter);
-
   // Run searches depending on type filter
   let postsDocs: any[] = [];
   let postsCount = 0;
-  let prayersCount = 0;
-  let praisesCount = 0;
+  let prayerTotal = 0;
+  let praiseTotal = 0;
 
   let peopleDocs: any[] = [];
   let peopleCount = 0;
@@ -95,25 +104,49 @@ export async function searchAll(params: {
   let churchesCount = 0;
 
   if (typeFilter === "all" || typeFilter === "posts" || typeFilter === "prayers" || typeFilter === "praises") {
-    const postQuery: Record<string, unknown> = { $or: postCondText };
+    // Also match author names
+    const matchingUsers = await User.find({
+      $or: [{ name: rx }, { email: rx }],
+    })
+      .select("_id")
+      .lean();
+    const matchingUserIds = matchingUsers.map((u) => u._id);
+
+    const postOrCond: Record<string, unknown>[] = [{ text: rx }];
+    if (matchingUserIds.length) {
+      postOrCond.push({ author: { $in: matchingUserIds } });
+    }
+    if (idFilter) postOrCond.push(idFilter);
+
+    const baseConditions: Record<string, unknown>[] = [
+      { moderationStatus: { $ne: "Hidden" } },
+      { $or: postOrCond },
+    ];
+    if (exclude.length) {
+      baseConditions.push({ author: { $nin: exclude } });
+    }
+
+    const postQuery: Record<string, unknown> = { $and: baseConditions };
     if (typeFilter === "prayers") postQuery.mode = "prayer";
     if (typeFilter === "praises") postQuery.mode = "praise";
 
-    const [totalPosts, prayerTotal, praiseTotal, docs] = await Promise.all([
-      Post.countDocuments({ $or: postCondText }),
-      Post.countDocuments({ $or: postCondText, mode: "prayer" }),
-      Post.countDocuments({ $or: postCondText, mode: "praise" }),
+    const [totalMatchingPosts, matchingPrayers, matchingPraises, docs] = await Promise.all([
+      Post.countDocuments(postQuery),
+      Post.countDocuments({ ...postQuery, mode: "prayer" }),
+      Post.countDocuments({ ...postQuery, mode: "praise" }),
       Post.find(postQuery)
-        .populate("author", "name avatar bio city state")
+        .populate("author", "name avatar bio city state country")
+        .populate("group", "name image privacy")
+        .populate("church", "name image")
         .sort({ createdAt: -1 })
         .skip(typeFilter === "all" ? 0 : skip)
-        .limit(typeFilter === "all" ? limit : limit)
+        .limit(limit)
         .lean(),
     ]);
 
-    postsCount = totalPosts;
-    prayersCount = prayerTotal;
-    praisesCount = praiseTotal;
+    postsCount = totalMatchingPosts;
+    prayerTotal = matchingPrayers;
+    praiseTotal = matchingPraises;
     postsDocs = docs;
   }
 
@@ -157,7 +190,21 @@ export async function searchAll(params: {
     churchDocs = docs;
   }
 
-  const mappedPosts = postsDocs.map((p) => mapPost(p, { viewerId: params.currentUserId }));
+  // Filter posts with valid authors and map reaction flags
+  const visiblePostDocs = postsDocs.filter((d) => d.author != null);
+  const postIds = visiblePostDocs.map((p) => p._id.toString());
+  const flags = await reactionFlags(params.currentUserId, postIds);
+
+  const mappedPosts = visiblePostDocs.map((p) => {
+    const f = flags.get(p._id.toString()) ?? { pray: false, praise: false, like: false };
+    return mapPost(p as never, {
+      prayed: f.pray,
+      praised: f.praise,
+      liked: f.like,
+      viewerId: params.currentUserId,
+    });
+  });
+
   const mappedPeople = peopleDocs.map((u) => mapAuthor(u));
   const mappedGroups = groupDocs.map((g) => ({
     id: g._id.toString(),
@@ -178,26 +225,46 @@ export async function searchAll(params: {
     isVerified: !!c.isVerified,
   }));
 
-  const total = postsCount + peopleCount + groupsCount + churchesCount;
+  const overallTotal = postsCount + peopleCount + groupsCount + churchesCount;
+  const activeTotal =
+    typeFilter === "posts" || typeFilter === "prayers" || typeFilter === "praises"
+      ? postsCount
+      : typeFilter === "people"
+        ? peopleCount
+        : typeFilter === "groups"
+          ? groupsCount
+          : typeFilter === "churches"
+            ? churchesCount
+            : overallTotal;
+
+  const totalPages = Math.max(1, Math.ceil(activeTotal / limit));
 
   return {
+    q,
     query: q,
+    type: typeFilter,
+    page,
+    limit,
+    total: activeTotal,
+    totalPages,
     counts: {
       posts: postsCount,
-      prayers: prayersCount,
-      praises: praisesCount,
+      prayers: prayerTotal,
+      praises: praiseTotal,
       people: peopleCount,
       groups: groupsCount,
       churches: churchesCount,
-      total,
+      total: overallTotal,
     },
+    posts: mappedPosts,
+    people: mappedPeople,
+    groups: mappedGroups,
+    churches: mappedChurches,
     results: {
       posts: mappedPosts,
       people: mappedPeople,
       groups: mappedGroups,
       churches: mappedChurches,
     },
-    page,
-    limit,
   };
 }

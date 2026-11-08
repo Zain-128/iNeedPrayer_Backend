@@ -10,7 +10,7 @@ import { ChurchMember } from "../models/churchMember.model.js";
 import { mapPost } from "../utils/mappers.js";
 import { buildPostTranslations } from "./translate.service.js";
 import { createNotification } from "./notifications.service.js";
-async function excludedAuthorIds(viewerId) {
+export async function excludedAuthorIds(viewerId) {
     const adminBlocked = await User.find({ status: "blocked" }).distinct("_id");
     if (!viewerId)
         return adminBlocked;
@@ -26,7 +26,7 @@ function assertPostVisible(post) {
         throw httpError("Post not found", 404);
     }
 }
-async function reactionFlags(userId, postIds) {
+export async function reactionFlags(userId, postIds) {
     if (!userId || !postIds.length) {
         return new Map();
     }
@@ -171,17 +171,36 @@ export async function createPost(authorId, body) {
     const imagesList = (Array.isArray(body.images) ? body.images : [])
         .map((img) => (typeof img === "string" ? img.trim() : ""))
         .filter(Boolean);
+    const videosList = (Array.isArray(body.videos) ? body.videos : [])
+        .map((vid) => (typeof vid === "string" ? vid.trim() : ""))
+        .filter(Boolean);
+    const rawMedia = Array.isArray(body.media) ? body.media : [];
+    for (const m of rawMedia) {
+        const url = typeof m === "string" ? m.trim() : (m?.url || m?.uri || "").trim();
+        const type = typeof m === "object" && m?.type ? m.type : "image";
+        if (url) {
+            if (type === "video") {
+                if (!videosList.includes(url))
+                    videosList.push(url);
+            }
+            else {
+                if (!imagesList.includes(url))
+                    imagesList.push(url);
+            }
+        }
+    }
     if (!imagesList.length && typeof body.image === "string" && body.image.trim()) {
         imagesList.push(body.image.trim());
     }
     const primaryImage = body.image?.trim() || imagesList[0] || "";
-    const videosList = (Array.isArray(body.videos) ? body.videos : [])
-        .map((vid) => (typeof vid === "string" ? vid.trim() : ""))
-        .filter(Boolean);
     if (!videosList.length && typeof body.video === "string" && body.video.trim()) {
         videosList.push(body.video.trim());
     }
     const primaryVideo = body.video?.trim() || videosList[0] || "";
+    const mediaList = [
+        ...imagesList.map((url) => ({ type: "image", url })),
+        ...videosList.map((url) => ({ type: "video", url })),
+    ];
     const post = await Post.create({
         author: authorId,
         text: rawText,
@@ -191,6 +210,7 @@ export async function createPost(authorId, body) {
         images: imagesList,
         video: primaryVideo,
         videos: videosList,
+        media: mediaList,
         mode: body.mode === "praise" ? "praise" : "prayer",
         group: body.groupId || null,
         church: body.churchId || null,

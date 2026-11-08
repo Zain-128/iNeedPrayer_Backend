@@ -255,20 +255,25 @@ export function registerLiveSocket(io: Server) {
 
     socket.on(
       "host-heartbeat",
-      async (data: { scope?: string; entityId?: string }) => {
-        const scope = data?.scope;
+      async (data: { scope?: string; entityId?: string; sessionId?: string }) => {
+        const scope = data?.scope as any;
         const entityId = data?.entityId;
+        const sessionId = data?.sessionId;
+
         if (
-          (scope !== "church" && scope !== "group") ||
-          !entityId ||
-          !mongoose.isValidObjectId(entityId)
+          !sessionId &&
+          ((scope !== "church" && scope !== "group") ||
+            !entityId ||
+            !mongoose.isValidObjectId(entityId))
         ) {
           return;
         }
+
         try {
           await touchHostHeartbeat({
             scope,
             entityId,
+            sessionId,
             userId,
           });
           socket.emit("host-heartbeat-ack", { ok: true });

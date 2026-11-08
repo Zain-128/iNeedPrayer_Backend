@@ -79,22 +79,27 @@ export function mapPost(post, opts) {
                 : ""),
         }
         : undefined;
-    const rawImages = Array.isArray(post.images)
-        ? post.images
-        : [];
-    const normalizedImages = rawImages
-        .map(normalizeMediaUrl)
-        .filter(Boolean);
+    const rawMediaList = Array.isArray(post.media) ? post.media : [];
+    const mediaImages = rawMediaList
+        .filter((m) => m && (m.type === "image" || !m.type) && (m.url || m.uri))
+        .map((m) => m.url || m.uri);
+    const mediaVideos = rawMediaList
+        .filter((m) => m && m.type === "video" && (m.url || m.uri))
+        .map((m) => m.url || m.uri);
+    const rawImages = [
+        ...(Array.isArray(post.images) ? post.images : []),
+        ...mediaImages,
+    ];
+    const normalizedImages = Array.from(new Set(rawImages.map(normalizeMediaUrl).filter(Boolean)));
     const primaryImage = normalizeMediaUrl(post.image ?? "") || normalizedImages[0] || "";
     if (primaryImage && !normalizedImages.includes(primaryImage)) {
         normalizedImages.unshift(primaryImage);
     }
-    const rawVideos = Array.isArray(post.videos)
-        ? post.videos
-        : [];
-    const normalizedVideos = rawVideos
-        .map(normalizeMediaUrl)
-        .filter(Boolean);
+    const rawVideos = [
+        ...(Array.isArray(post.videos) ? post.videos : []),
+        ...mediaVideos,
+    ];
+    const normalizedVideos = Array.from(new Set(rawVideos.map(normalizeMediaUrl).filter(Boolean)));
     const primaryVideo = normalizeMediaUrl(post.video ?? "") || normalizedVideos[0] || "";
     if (primaryVideo && !normalizedVideos.includes(primaryVideo)) {
         normalizedVideos.unshift(primaryVideo);

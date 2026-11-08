@@ -43,6 +43,7 @@ const churchSchema = new mongoose.Schema({
     pastorBio: { type: String, default: "" },
     verificationCode: { type: String, select: false, default: null },
     verificationCodeExpiresAt: { type: Date, select: false, default: null },
+    verificationRequestedAt: { type: Date, select: false, default: null },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",

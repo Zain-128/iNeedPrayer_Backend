@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import {
   COINS_PACKAGES,
+  type CoinPackageDef,
   COIN_WITHDRAW_VALUE_CENTS,
   CUSTOM_COINS_MAX,
   CUSTOM_COINS_MIN,
@@ -25,7 +26,7 @@ import { LiveStreamSession } from "../models/liveStreamSession.model.js";
 import { getIo } from "../socket/ioSingleton.js";
 import { IapReceipt } from "../models/iapReceipt.model.js";
 import { queueEmail } from "./email/mailer.js";
-import { withdrawalRequestedEmail } from "./email/templates.js";
+import { withdrawalRequestedEmail, coinsPurchasedEmail } from "./email/templates.js";
 import {
   computeReceiptHash,
   consumeGoogleProductServer,
@@ -569,6 +570,53 @@ export async function settleWithdrawalInWallet(
   }
 }
 
+export function matchCoinPackage(productId: string): CoinPackageDef | null {
+  const clean = productId.trim().toLowerCase();
+
+  // 1. Direct match on googlePlayProductId or appStoreProductId
+  for (const pkg of COINS_PACKAGES) {
+    if (
+      pkg.googlePlayProductId.toLowerCase() === clean ||
+      pkg.appStoreProductId.toLowerCase() === clean
+    ) {
+      return pkg;
+    }
+  }
+
+  // 2. Suffix or delimiter match (e.g. "com.ineedprayer:coins100" or "com.ineedprayer.coins100")
+  for (const pkg of COINS_PACKAGES) {
+    const gId = pkg.googlePlayProductId.toLowerCase();
+    const aId = pkg.appStoreProductId.toLowerCase();
+    if (
+      clean.endsWith(":" + gId) ||
+      clean.endsWith("." + gId) ||
+      clean.endsWith("/" + gId) ||
+      clean.endsWith("." + aId)
+    ) {
+      return pkg;
+    }
+  }
+
+  // 3. Fallback on standard package product keys
+  if (clean.includes("coins5000") || clean.endsWith("5000")) {
+    return COINS_PACKAGES.find((p) => p.googlePlayProductId === "coins5000") || null;
+  }
+  if (clean.includes("coins2500") || clean.endsWith("2500")) {
+    return COINS_PACKAGES.find((p) => p.googlePlayProductId === "coins2500") || null;
+  }
+  if (clean.includes("coins1000") || clean.endsWith("1000")) {
+    return COINS_PACKAGES.find((p) => p.googlePlayProductId === "coins1000") || null;
+  }
+  if (clean.includes("coins500") || clean.endsWith("500")) {
+    return COINS_PACKAGES.find((p) => p.googlePlayProductId === "coins500") || null;
+  }
+  if (clean.includes("coins100") || clean.endsWith("100")) {
+    return COINS_PACKAGES.find((p) => p.googlePlayProductId === "coins100") || null;
+  }
+
+  return null;
+}
+
 export async function verifyAndProcessIapPurchase(opts: {
   userId: string;
   platform: "ios" | "android";
@@ -601,18 +649,7 @@ export async function verifyAndProcessIapPurchase(opts: {
   }
 
   const cleanSku = productId.trim();
-  const matchedPkg = COINS_PACKAGES.find(
-    (p) =>
-      p.appStoreProductId === cleanSku ||
-      p.googlePlayProductId === cleanSku ||
-      cleanSku.endsWith(p.appStoreProductId) ||
-      cleanSku.endsWith(p.googlePlayProductId) ||
-      (cleanSku.endsWith("coins100") && p.coins === 100) ||
-      (cleanSku.endsWith("coins500") && p.coins === 525) ||
-      (cleanSku.endsWith("coins1000") && p.coins === 1100) ||
-      (cleanSku.endsWith("coins2500") && p.coins === 2750) ||
-      (cleanSku.endsWith("coins5000") && p.coins === 5750)
-  );
+  const matchedPkg = matchCoinPackage(cleanSku);
 
   if (!matchedPkg) {
     throw httpError(`Invalid or unrecognized productId: ${cleanSku}`, 400);
@@ -621,9 +658,10 @@ export async function verifyAndProcessIapPurchase(opts: {
   // Perform live store receipt/token verification
   let verifyResult: VerifyReceiptResult;
   if (platform === "ios") {
-    verifyResult = await verifyAppleReceipt(receiptOrToken, cleanSku);
+    verifyResult = await verifyAppleReceipt(receiptOrToken, matchedPkg.appStoreProductId);
   } else {
-    verifyResult = await verifyGooglePurchase(cleanSku, receiptOrToken);
+    // For Google Play, verify against the exact Google Play Product ID (coins100, coins500, etc.)
+    verifyResult = await verifyGooglePurchase(matchedPkg.googlePlayProductId, receiptOrToken);
   }
 
   if (!verifyResult.valid) {
@@ -633,11 +671,14 @@ export async function verifyAndProcessIapPurchase(opts: {
     );
   }
 
+  const effectiveProductId =
+    platform === "android" ? matchedPkg.googlePlayProductId : matchedPkg.appStoreProductId;
+
   // Record IAP receipt to prevent reuse
   await IapReceipt.create({
     user: new mongoose.Types.ObjectId(userId),
     platform,
-    productId: cleanSku,
+    productId: effectiveProductId,
     receiptOrTokenHash: receiptHash,
     transactionId: opts.transactionId || verifyResult.transactionId || "",
     coins: matchedPkg.coins,
@@ -645,7 +686,7 @@ export async function verifyAndProcessIapPurchase(opts: {
     rawResponse: verifyResult.raw ?? null,
   });
 
-  // Credit user wallet balance
+  // Credit user wallet balance with Base + Bonus (Total Wallet Credit)
   await ensureUserWallet(userId);
   const coinsDoc = await UserCoins.findOneAndUpdate(
     { user: userId },
@@ -655,6 +696,9 @@ export async function verifyAndProcessIapPurchase(opts: {
 
   const user = await User.findById(userId).select("name email avatar").lean();
 
+  const storeLabel = platform === "ios" ? "Apple App Store" : "Google Play Store";
+  const bonusLabel = matchedPkg.bonusCoins > 0 ? ` (+${matchedPkg.bonusCoins} Bonus)` : "";
+
   const ledger = await WalletLedger.create({
     kind: "purchase",
     toOwnerType: "user",
@@ -662,11 +706,15 @@ export async function verifyAndProcessIapPurchase(opts: {
     coins: matchedPkg.coins,
     feeCoins: 0,
     netCoins: matchedPkg.coins,
-    message: `Purchased ${matchedPkg.label} via ${platform === "ios" ? "Apple App Store" : "Google Play Store"}`,
+    message: `Purchased ${matchedPkg.label}${bonusLabel} via ${storeLabel}`,
     actorUserId: new mongoose.Types.ObjectId(userId),
     metadata: {
       platform,
-      productId: cleanSku,
+      productId: effectiveProductId,
+      googlePlayProductId: matchedPkg.googlePlayProductId,
+      baseCoins: matchedPkg.baseCoins,
+      bonusCoins: matchedPkg.bonusCoins,
+      totalCoins: matchedPkg.coins,
       priceCents: matchedPkg.priceCents,
     },
   });
@@ -684,19 +732,46 @@ export async function verifyAndProcessIapPurchase(opts: {
     method: platform === "ios" ? "IAP (Apple)" : "IAP (Google)",
     transactionId: opts.transactionId || verifyResult.transactionId || ledgerId,
     status: "Completed",
-    description: `IAP Purchase: ${matchedPkg.label}`,
-    metadata: { platform, productId: cleanSku },
+    description: `IAP Purchase: ${matchedPkg.label}${bonusLabel} (${matchedPkg.coins} Coins total)`,
+    metadata: {
+      platform,
+      productId: effectiveProductId,
+      googlePlayProductId: matchedPkg.googlePlayProductId,
+      baseCoins: matchedPkg.baseCoins,
+      bonusCoins: matchedPkg.bonusCoins,
+      totalCoins: matchedPkg.coins,
+    },
   });
 
-  // Perform Android Play Store product consumption
+  // Perform Android Play Store product consumption so the consumable can be repurchased
   if (platform === "android") {
-    void consumeGoogleProductServer(cleanSku, receiptOrToken);
+    void consumeGoogleProductServer(matchedPkg.googlePlayProductId, receiptOrToken);
+  }
+
+  // Send purchase receipt email if user has email
+  if (user?.email) {
+    try {
+      queueEmail(
+        user.email,
+        coinsPurchasedEmail({
+          name: user.name,
+          coins: matchedPkg.coins,
+          amountCents: matchedPkg.priceCents,
+          label: `${matchedPkg.label}${bonusLabel}`,
+          transactionId: opts.transactionId || verifyResult.transactionId || ledgerId,
+        })
+      );
+    } catch {
+      // non-fatal email error
+    }
   }
 
   return {
     ok: true as const,
-    message: `Successfully credited ${matchedPkg.coins} coins`,
+    message: `Successfully credited ${matchedPkg.coins} coins (${matchedPkg.baseCoins} base + ${matchedPkg.bonusCoins} bonus)`,
     coinsAdded: matchedPkg.coins,
+    baseCoins: matchedPkg.baseCoins,
+    bonusCoins: matchedPkg.bonusCoins,
     balanceCoins: coinsDoc?.balance ?? 0,
     transactionId: ledgerId,
   };

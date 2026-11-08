@@ -17,6 +17,7 @@ import { User } from "../models/user.model.js";
 import { FriendRequest } from "../models/friendRequest.model.js";
 import { UserBlock } from "../models/userBlock.model.js";
 import { UserSubscription } from "../models/userSubscription.model.js";
+import { LiveStreamSettings } from "../models/liveStreamSettings.model.js";
 import { Post } from "../models/post.model.js";
 import { Comment } from "../models/comment.model.js";
 import { PostReaction } from "../models/postReaction.model.js";
@@ -696,18 +697,22 @@ export async function approveJoinRequest(
 
   const request = await GroupJoinRequest.findOne({
     group: groupId,
-    user: targetUserId,
     status: "pending",
+    $or: [
+      { user: targetUserId },
+      ...(mongoose.isValidObjectId(targetUserId) ? [{ _id: targetUserId }] : []),
+    ],
   });
   if (!request) throw httpError("Join request not found", 404);
 
-  await addGroupMemberDirect(groupId, targetUserId);
+  const resolvedUserId = request.user.toString();
+  await addGroupMemberDirect(groupId, resolvedUserId);
   request.status = "approved";
   await request.save();
 
   const g = await Group.findById(groupId);
   await createNotification({
-    userId: targetUserId,
+    userId: resolvedUserId,
     title: "Join request approved",
     body: `You were approved to join ${g?.name ?? "the group"}`,
     kind: "group_join_approved",
@@ -718,7 +723,7 @@ export async function approveJoinRequest(
 
   const memberCount = await syncGroupMemberCount(groupId);
 
-  return { ok: true, userId: targetUserId, status: "approved", memberCount };
+  return { ok: true, userId: resolvedUserId, status: "approved", memberCount };
 }
 
 export async function rejectJoinRequest(
@@ -730,15 +735,61 @@ export async function rejectJoinRequest(
 
   const request = await GroupJoinRequest.findOne({
     group: groupId,
-    user: targetUserId,
     status: "pending",
+    $or: [
+      { user: targetUserId },
+      ...(mongoose.isValidObjectId(targetUserId) ? [{ _id: targetUserId }] : []),
+    ],
   });
   if (!request) throw httpError("Join request not found", 404);
 
   request.status = "rejected";
   await request.save();
 
-  return { ok: true, userId: targetUserId, status: "rejected" };
+  return { ok: true, userId: request.user.toString(), status: "rejected" };
+}
+
+export async function listSentJoinRequests(userId: string) {
+  const requests = await GroupJoinRequest.find({
+    user: userId,
+  })
+    .populate("group", "name image bannerImage description privacy")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return {
+    requests: requests
+      .filter((r) => r.group != null)
+      .map((r: any) => ({
+        id: r._id.toString(),
+        groupId: r.group?._id?.toString() ?? "",
+        groupName: r.group?.name ?? "",
+        groupImage: r.group?.image || r.group?.bannerImage || "",
+        status: r.status,
+        requestedAt: r.createdAt,
+      })),
+  };
+}
+
+export async function cancelJoinRequest(userId: string, groupIdOrRequestId: string) {
+  const query: any = {
+    user: userId,
+    status: "pending",
+  };
+
+  if (mongoose.isValidObjectId(groupIdOrRequestId)) {
+    query.$or = [{ group: groupIdOrRequestId }, { _id: groupIdOrRequestId }];
+  } else {
+    query.group = groupIdOrRequestId;
+  }
+
+  const request = await GroupJoinRequest.findOne(query);
+  if (!request) {
+    throw httpError("Pending join request not found", 404);
+  }
+
+  await request.deleteOne();
+  return { message: "Join request cancelled successfully", ok: true };
 }
 
 export async function leaveGroup(userId: string, groupId: string) {
@@ -1784,5 +1835,117 @@ export async function getGroupPermissionsAndLimits(
     subscription,
     memberCount: g.memberCount,
     privacy: g.privacy || "Public",
+  };
+}
+
+export async function listReceivedGroupInvites(userId: string) {
+  const invites = await GroupInvite.find({
+    user: userId,
+    status: "pending",
+  })
+    .populate("group", "name image bannerImage description memberCount")
+    .populate("invitedBy", "name avatar")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return {
+    invites: invites
+      .filter((i) => i.group != null)
+      .map((i: any) => ({
+        id: i._id.toString(),
+        groupId: i.group?._id?.toString() ?? "",
+        groupName: i.group?.name ?? "",
+        groupImage: i.group?.image || i.group?.bannerImage || "",
+        memberCount: i.group?.memberCount ?? 0,
+        invitedBy: {
+          id: i.invitedBy?._id?.toString() ?? "",
+          name: i.invitedBy?.name ?? "",
+          avatar: i.invitedBy?.avatar ?? "",
+        },
+        status: i.status,
+        invitedAt: i.createdAt,
+      })),
+  };
+}
+
+export async function getGroupLiveStreamSettings(groupId: string, userId: string) {
+  const g = await Group.findById(groupId).lean();
+  if (!g) throw httpError("Group not found", 404);
+
+  let doc = await LiveStreamSettings.findOne({
+    sourceType: "group",
+    sourceId: new mongoose.Types.ObjectId(groupId),
+  }).lean();
+
+  if (!doc) {
+    return {
+      settings: {
+        sourceType: "group",
+        sourceId: groupId,
+        enabled: true,
+        allowedRoles: ["owner", "admin"],
+        liveChatEnabled: true,
+        superChatsEnabled: true,
+        donationsEnabled: true,
+        reactionsEnabled: true,
+        replayEnabled: true,
+        moderationEnabled: true,
+      },
+    };
+  }
+
+  return {
+    settings: {
+      sourceType: doc.sourceType,
+      sourceId: doc.sourceId.toString(),
+      enabled: doc.enabled,
+      allowedRoles: doc.allowedRoles,
+      liveChatEnabled: doc.liveChatEnabled,
+      superChatsEnabled: doc.superChatsEnabled,
+      donationsEnabled: doc.donationsEnabled,
+      reactionsEnabled: doc.reactionsEnabled,
+      replayEnabled: doc.replayEnabled,
+      moderationEnabled: doc.moderationEnabled,
+    },
+  };
+}
+
+export async function updateGroupLiveStreamSettings(
+  groupId: string,
+  userId: string,
+  patch: any
+) {
+  await assertGroupManager(groupId, userId);
+
+  const update: Record<string, unknown> = {};
+  if (typeof patch.enabled === "boolean") update.enabled = patch.enabled;
+  if (Array.isArray(patch.allowedRoles)) update.allowedRoles = patch.allowedRoles;
+  if (typeof patch.liveChatEnabled === "boolean") update.liveChatEnabled = patch.liveChatEnabled;
+  if (typeof patch.superChatsEnabled === "boolean") update.superChatsEnabled = patch.superChatsEnabled;
+  if (typeof patch.donationsEnabled === "boolean") update.donationsEnabled = patch.donationsEnabled;
+  if (typeof patch.reactionsEnabled === "boolean") update.reactionsEnabled = patch.reactionsEnabled;
+  if (typeof patch.replayEnabled === "boolean") update.replayEnabled = patch.replayEnabled;
+  if (typeof patch.moderationEnabled === "boolean") update.moderationEnabled = patch.moderationEnabled;
+
+  const doc = await LiveStreamSettings.findOneAndUpdate(
+    { sourceType: "group", sourceId: new mongoose.Types.ObjectId(groupId) },
+    { $set: update },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  ).lean();
+
+  return {
+    message: "Live stream settings updated successfully",
+    settings: {
+      sourceType: doc!.sourceType,
+      sourceId: doc!.sourceId.toString(),
+      enabled: doc!.enabled,
+      allowedRoles: doc!.allowedRoles,
+      liveChatEnabled: doc!.liveChatEnabled,
+      superChatsEnabled: doc!.superChatsEnabled,
+      donationsEnabled: doc!.donationsEnabled,
+      reactionsEnabled: doc!.reactionsEnabled,
+      replayEnabled: doc!.replayEnabled,
+      moderationEnabled: doc!.moderationEnabled,
+    },
   };
 }

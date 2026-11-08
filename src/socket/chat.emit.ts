@@ -11,6 +11,35 @@ export function broadcastNewMessage(
   payload: unknown
 ) {
   io.to(`chat:${conversationId}`).emit("new-message", payload);
+  io.to(`chat:${conversationId}`).emit("message:created", payload);
+}
+
+export function broadcastMessageUpdated(
+  io: Server,
+  conversationId: string,
+  messageId: string,
+  message: unknown
+) {
+  const payload = {
+    conversationId,
+    messageId,
+    message,
+  };
+  io.to(`chat:${conversationId}`).emit("message:updated", payload);
+  io.to(`chat:${conversationId}`).emit("message-edited", payload);
+}
+
+export function broadcastMessageDeleted(
+  io: Server,
+  conversationId: string,
+  messageId: string
+) {
+  const payload = {
+    conversationId,
+    messageId,
+  };
+  io.to(`chat:${conversationId}`).emit("message:deleted", payload);
+  io.to(`chat:${conversationId}`).emit("message-deleted", payload);
 }
 
 export async function broadcastChatUpdated(io: Server, conversationId: string) {
@@ -26,8 +55,17 @@ export async function broadcastChatUpdated(io: Server, conversationId: string) {
         kind: (conv as { kind?: string }).kind,
         title: (conv as { title?: string }).title,
         image: (conv as { image?: string }).image,
+        description: (conv as any).description,
+        group: (conv as any).group,
+        isCommunityGroup: (conv as any).isCommunityGroup,
+        privacy: (conv as any).privacy,
+        status: (conv as any).status,
+        requestedBy: (conv as any).requestedBy,
         lastMessageText: conv.lastMessageText,
         lastMessageAt: conv.lastMessageAt,
+        lastReadAt: (conv as any).lastReadAt,
+        archivedBy: (conv as any).archivedBy,
+        mutedBy: (conv as any).mutedBy,
         members,
       },
       m._id.toString()

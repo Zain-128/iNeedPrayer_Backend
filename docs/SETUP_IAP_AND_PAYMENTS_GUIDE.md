@@ -52,21 +52,20 @@ This guide provides step-by-step instructions to configure **Apple App Store (iO
 
 ## 3. Google Play Console Setup (Android)
 
-### Step 3.1: Create App & Consumable Products
-1. Log in to [Google Play Console](https://play.google.com/console).
-2. Select your app (`com.ineedprayer.app`).
-3. Go to **Monetize** → **In-app products**.
-4. Create 5 consumable products matching backend SKUs:
+### Step 3.1: Active Consumable Coin Packages
+- **Android Package Name**: `com.ineedprayer`
+- **Purchase Option ID**: `standard`
+- **Purchase Type**: `Buy` (One-Time Purchase / Consumable)
 
-| Product Name | Product ID / SKU | Type | Price (USD) |
-|---|---|---|---|
-| Starter (100 Coins) | `com.ineedprayer.coins100` | Consumable | $0.99 |
-| Popular (525 Coins) | `com.ineedprayer.coins525` | Consumable | $4.99 |
-| Supporter (1,100 Coins) | `com.ineedprayer.coins1100` | Consumable | $9.99 |
-| Best Value (2,750 Coins) | `com.ineedprayer.coins2750` | Consumable | $24.99 |
-| Patron (5,750 Coins) | `com.ineedprayer.coins5750` | Consumable | $49.99 |
+| Package | Google Play Product ID | Price (USD) | Base Coins | Bonus Coins | Total Wallet Credit |
+|---|---|---|---|---|---|
+| **100 Coins** | `coins100` | $0.99 | 100 | +0 | **100 Coins** |
+| **500 Coins** | `coins500` | $4.99 | 500 | +25 | **525 Coins** |
+| **1,000 Coins** | `coins1000` | $9.99 | 1,000 | +100 | **1,100 Coins** |
+| **2,500 Coins** | `coins2500` | $24.99 | 2,500 | +250 | **2,750 Coins** |
+| **5,000 Coins** | `coins5000` | $49.99 | 5,000 | +750 | **5,750 Coins** |
 
-5. Set status to **Active** for all products.
+> **Note on Bonus Coins**: Bonus coins are handled exclusively by the iNeedPrayer backend wallet credit logic and are **not** separate Google Play products. When Google Play verifies a purchase for product `coins500`, the backend automatically credits 525 coins (500 base + 25 bonus) to the user's wallet.
 
 ### Step 3.2: Configure Google Cloud Service Account for API Verification
 Backend verification of Android purchases requires Google Play Developer API permissions:
@@ -86,13 +85,15 @@ Backend verification of Android purchases requires Google Play Developer API per
 ### Step 3.3: Configure Backend Environment Variables
 Option A (JSON File Path):
 ```env
-GOOGLE_PLAY_PACKAGE_NAME=com.ineedprayer.app
+GOOGLE_PLAY_PACKAGE_NAME=com.ineedprayer
 GOOGLE_SERVICE_ACCOUNT_PATH=./config/google-service-account.json
 ```
 
 Option B (JSON Inline String):
 ```env
-GOOGLE_PLAY_PACKAGE_NAME=com.ineedprayer.app
+GOOGLE_PLAY_PACKAGE_NAME=com.ineedprayer
+GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"...","private_key":"..."}
+```
 GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"...","private_key":"..."}
 ```
 

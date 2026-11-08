@@ -14,8 +14,17 @@ function getGooglePlayPackageName(): string {
   return (
     process.env.GOOGLE_PLAY_PACKAGE_NAME ||
     process.env.GOOGLE_PACKAGE_NAME ||
-    "com.ineedprayer.app"
+    "com.ineedprayer"
   );
+}
+
+export function normalizeGooglePlayProductId(rawProductId: string): string {
+  let s = (rawProductId || "").trim();
+  // Strip package prefix if sent like "com.ineedprayer:coins100" or "com.ineedprayer.coins100"
+  if (s.includes(":")) {
+    s = s.split(":").pop() || s;
+  }
+  return s.trim();
 }
 
 export function computeReceiptHash(receiptOrToken: string): string {
@@ -243,6 +252,7 @@ export async function verifyGooglePurchase(
     return { valid: false, reason: "Missing productId or purchaseToken" };
   }
 
+  const cleanProductId = normalizeGooglePlayProductId(productId);
   const packageName = getGooglePlayPackageName();
   const serviceAccount = loadGoogleServiceAccount();
 
@@ -257,7 +267,7 @@ export async function verifyGooglePurchase(
     return {
       valid: true,
       reason: "verification-disabled-non-production",
-      productId,
+      productId: cleanProductId,
     };
   }
 
@@ -265,7 +275,7 @@ export async function verifyGooglePurchase(
     const accessToken = await getGoogleAccessToken(serviceAccount);
     const url = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(
       packageName
-    )}/purchases/products/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(
+    )}/purchases/products/${encodeURIComponent(cleanProductId)}/tokens/${encodeURIComponent(
       purchaseToken
     )}`;
 
@@ -312,6 +322,7 @@ export async function consumeGoogleProductServer(
     return { ok: false, reason: "Missing productId or purchaseToken" };
   }
 
+  const cleanProductId = normalizeGooglePlayProductId(productId);
   const packageName = getGooglePlayPackageName();
   const serviceAccount = loadGoogleServiceAccount();
   if (!serviceAccount) {
@@ -322,7 +333,7 @@ export async function consumeGoogleProductServer(
     const accessToken = await getGoogleAccessToken(serviceAccount);
     const consumeUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(
       packageName
-    )}/purchases/products/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(
+    )}/purchases/products/${encodeURIComponent(cleanProductId)}/tokens/${encodeURIComponent(
       purchaseToken
     )}:consume`;
 

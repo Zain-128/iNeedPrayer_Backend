@@ -153,12 +153,21 @@ export function mapPost(
         }
       : undefined;
 
-  const rawImages: string[] = Array.isArray((post as any).images)
-    ? (post as any).images
-    : [];
-  const normalizedImages = rawImages
-    .map(normalizeMediaUrl)
-    .filter(Boolean);
+  const rawMediaList = Array.isArray((post as any).media) ? (post as any).media : [];
+  const mediaImages = rawMediaList
+    .filter((m: any) => m && (m.type === "image" || !m.type) && (m.url || m.uri))
+    .map((m: any) => m.url || m.uri);
+  const mediaVideos = rawMediaList
+    .filter((m: any) => m && m.type === "video" && (m.url || m.uri))
+    .map((m: any) => m.url || m.uri);
+
+  const rawImages: string[] = [
+    ...(Array.isArray((post as any).images) ? (post as any).images : []),
+    ...mediaImages,
+  ];
+  const normalizedImages = Array.from(
+    new Set(rawImages.map(normalizeMediaUrl).filter(Boolean))
+  );
 
   const primaryImage =
     normalizeMediaUrl(post.image ?? "") || normalizedImages[0] || "";
@@ -167,12 +176,13 @@ export function mapPost(
     normalizedImages.unshift(primaryImage);
   }
 
-  const rawVideos: string[] = Array.isArray((post as any).videos)
-    ? (post as any).videos
-    : [];
-  const normalizedVideos = rawVideos
-    .map(normalizeMediaUrl)
-    .filter(Boolean);
+  const rawVideos: string[] = [
+    ...(Array.isArray((post as any).videos) ? (post as any).videos : []),
+    ...mediaVideos,
+  ];
+  const normalizedVideos = Array.from(
+    new Set(rawVideos.map(normalizeMediaUrl).filter(Boolean))
+  );
 
   const primaryVideo =
     normalizeMediaUrl((post as any).video ?? "") || normalizedVideos[0] || "";

@@ -117,6 +117,7 @@ app.use("/api/friends", friendsRoutes);
 app.use("/api/block", blockRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/live", liveStreamRoutes);
+app.use("/api/live-stream", liveStreamRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/admin", adminRoutes);

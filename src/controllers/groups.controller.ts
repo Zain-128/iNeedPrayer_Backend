@@ -726,3 +726,68 @@ export const declineInvite = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const listSentJoinRequests = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const result = await groupsService.listSentJoinRequests(req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const cancelJoinRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const targetId = paramStr(req.params.id || req.params.requestId);
+    if (!targetId) return invalidId(res);
+    const result = await groupsService.cancelJoinRequest(req.userId, targetId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const listReceivedInvites = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const result = await groupsService.listReceivedGroupInvites(req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const getLiveSettings = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) return invalidId(res);
+    const result = await groupsService.getGroupLiveStreamSettings(id, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const updateLiveSettings = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const id = paramStr(req.params.id);
+    if (!mongoose.isValidObjectId(id)) return invalidId(res);
+    const result = await groupsService.updateGroupLiveStreamSettings(
+      id,
+      req.userId,
+      req.body ?? {}
+    );
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+

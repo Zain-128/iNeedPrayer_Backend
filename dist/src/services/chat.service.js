@@ -15,10 +15,33 @@ function httpError(message, statusCode) {
     return err;
 }
 export async function toConversationListItem(conv, viewerId) {
+    const status = conv.status || "active";
+    const requestStatus = status || "active";
+    const requestedById = conv.requestedBy?._id?.toString?.() ??
+        conv.requestedBy?.toString?.() ??
+        null;
+    const isRequest = status === "pending" && requestedById !== viewerId;
+    let canSendMessages = true;
+    if (status === "declined") {
+        canSendMessages = false;
+    }
+    else if (status === "pending" && requestedById === viewerId) {
+        if (conv.lastMessageText) {
+            canSendMessages = false;
+        }
+    }
     const base = {
         id: conv._id.toString(),
+        _id: conv._id.toString(),
+        conversationId: conv._id.toString(),
         lastMessage: conv.lastMessageText ?? "",
+        lastMessageText: conv.lastMessageText ?? "",
         time: conv.lastMessageAt ? timeAgo(conv.lastMessageAt) : "",
+        lastMessageAt: conv.lastMessageAt ?? null,
+        status,
+        requestStatus,
+        requestedBy: requestedById,
+        canSendMessages,
     };
     const kind = conv.kind || "direct";
     // Unread count
@@ -40,8 +63,6 @@ export async function toConversationListItem(conv, viewerId) {
         conv.mutedBy.find((m) => (m.user?._id?.toString?.() ?? m.user?.toString?.()) === viewerId);
     const isMuted = !!(muteEntry &&
         (!muteEntry.mutedUntil || new Date(muteEntry.mutedUntil) > new Date()));
-    const status = conv.status || "active";
-    const isRequest = status === "pending" && conv.requestedBy?.toString() !== viewerId;
     if (kind === "group") {
         const groupId = conv.group?._id?.toString() || conv.group?.toString() || "";
         return {
@@ -49,6 +70,7 @@ export async function toConversationListItem(conv, viewerId) {
             isGroup: true,
             title: (conv.title || "Group").trim(),
             image: conv.image ?? "",
+            avatar: conv.image ?? "",
             description: conv.description ?? "",
             memberCount: conv.members.length,
             unreadCount,
@@ -67,16 +89,20 @@ export async function toConversationListItem(conv, viewerId) {
     const peer = peerId
         ? conv.members.find((m) => (m._id ? m._id.toString() : m.toString()) === peerId)
         : null;
+    const peerObj = peer && typeof peer === "object" && "name" in peer
+        ? {
+            id: peer._id ? peer._id.toString() : peerId || "",
+            name: peer.name,
+            avatar: peer.avatar ?? "",
+        }
+        : { id: peerId || "", name: "Unknown", avatar: "" };
     return {
         ...base,
         isGroup: false,
-        peer: peer && typeof peer === "object" && "name" in peer
-            ? {
-                id: peer._id ? peer._id.toString() : peerId || "",
-                name: peer.name,
-                avatar: peer.avatar ?? "",
-            }
-            : { id: peerId || "", name: "Unknown", avatar: "" },
+        peer: peerObj,
+        peerUser: peerObj,
+        title: peerObj.name,
+        avatar: peerObj.avatar,
         unreadCount,
         isArchived,
         isMuted,
@@ -104,6 +130,7 @@ export async function listConversations(userId, opts) {
         query.archivedBy = { $ne: new mongoose.Types.ObjectId(userId) };
         query.$or = [
             { status: "active" },
+            { status: "accepted" },
             { status: { $exists: false } },
             { status: "pending", requestedBy: new mongoose.Types.ObjectId(userId) },
         ];
@@ -179,15 +206,39 @@ export async function getOrCreateConversation(userId, peerUserId) {
             ].sort((a, b) => a.toString().localeCompare(b.toString())),
         });
     }
-    else if (conv.status === "declined" && isFriend) {
-        conv.status = "active";
-        await conv.save();
+    else {
+        // If they became friends since, restore active status
+        if (isFriend && (conv.status === "declined" || conv.status === "pending")) {
+            conv.status = "active";
+            await conv.save();
+        }
     }
     await ConversationHide.deleteOne({
         user: userId,
         conversation: conv._id,
     });
-    return { conversationId: conv._id.toString(), status: conv.status || "active" };
+    const convStatus = conv.status || "active";
+    let canSendMessages = true;
+    if (convStatus === "declined") {
+        canSendMessages = false;
+    }
+    else if (convStatus === "pending") {
+        if (conv.requestedBy?.toString() === userId) {
+            const msgCount = await Message.countDocuments({
+                conversation: conv._id,
+                sender: userId,
+            });
+            if (msgCount >= 1) {
+                canSendMessages = false;
+            }
+        }
+    }
+    return {
+        conversationId: conv._id.toString(),
+        status: convStatus,
+        requestStatus: convStatus,
+        canSendMessages,
+    };
 }
 export async function createGroupConversation(creatorId, body) {
     if (body.groupId && mongoose.isValidObjectId(body.groupId)) {
@@ -443,12 +494,32 @@ export async function getConversationDetails(conversationId, userId) {
         state: m.state || "",
         role: adminSet.has(m._id.toString()) ? "admin" : "member",
     }));
+    const status = conv.status || "active";
+    const requestedBy = conv.requestedBy?.toString() || null;
+    let canSendMessages = true;
+    if (status === "declined") {
+        canSendMessages = false;
+    }
+    else if (status === "pending") {
+        if (requestedBy === userId) {
+            const msgCount = await Message.countDocuments({
+                conversation: conversationId,
+                sender: userId,
+            });
+            if (msgCount >= 1) {
+                canSendMessages = false;
+            }
+        }
+    }
     return {
         id: conv._id.toString(),
+        _id: conv._id.toString(),
+        conversationId: conv._id.toString(),
         kind: conv.kind || "direct",
         isGroup: conv.kind === "group",
         title: conv.title || (conv.kind === "group" ? "Group Chat" : ""),
         image: conv.image || "",
+        avatar: conv.image || "",
         description: conv.description || "",
         isCommunityGroup: !!conv.isCommunityGroup,
         group: conv.group
@@ -465,6 +536,10 @@ export async function getConversationDetails(conversationId, userId) {
         isAdmin: adminSet.has(userId),
         members: membersWithRoles,
         admins: [...adminSet],
+        status,
+        requestStatus: status,
+        requestedBy,
+        canSendMessages,
         createdAt: conv.createdAt,
     };
 }
@@ -583,6 +658,121 @@ export async function getUnreadMessagesCount(userId) {
     }
     return { totalUnread };
 }
+export async function listMessageRequests(userId, opts) {
+    const tab = opts?.tab || "incoming";
+    const hidden = await ConversationHide.find({ user: userId }).distinct("conversation");
+    const hiddenSet = new Set(hidden.map((id) => id.toString()));
+    const query = {
+        members: new mongoose.Types.ObjectId(userId),
+        status: "pending",
+    };
+    if (tab === "incoming") {
+        query.requestedBy = { $ne: new mongoose.Types.ObjectId(userId) };
+    }
+    else if (tab === "outgoing" || tab === "sent") {
+        query.requestedBy = new mongoose.Types.ObjectId(userId);
+    }
+    const convs = await Conversation.find(query)
+        .sort({ lastMessageAt: -1, updatedAt: -1 })
+        .populate("members", "name avatar")
+        .lean();
+    const out = [];
+    for (const c of convs) {
+        if (hiddenSet.has(c._id.toString()))
+            continue;
+        const members = (c.members || []);
+        out.push(await toConversationListItem({
+            _id: c._id,
+            kind: c.kind,
+            title: c.title,
+            image: c.image,
+            description: c.description,
+            group: c.group,
+            isCommunityGroup: c.isCommunityGroup,
+            privacy: c.privacy,
+            status: c.status,
+            requestedBy: c.requestedBy,
+            lastMessageText: c.lastMessageText,
+            lastMessageAt: c.lastMessageAt,
+            lastReadAt: c.lastReadAt,
+            archivedBy: c.archivedBy,
+            mutedBy: c.mutedBy,
+            members,
+        }, userId));
+    }
+    return out;
+}
+export async function createMessageRequest(senderId, recipientId, text) {
+    if (senderId === recipientId) {
+        throw httpError("Cannot send message request to yourself", 400);
+    }
+    const blocked = await UserBlock.findOne({
+        $or: [
+            { blocker: senderId, blocked: recipientId },
+            { blocker: recipientId, blocked: senderId },
+        ],
+    });
+    if (blocked) {
+        throw httpError("Cannot message this user", 403);
+    }
+    const peer = await User.findById(recipientId);
+    if (!peer) {
+        throw httpError("Recipient user not found", 404);
+    }
+    // Check friendship status
+    const isFriend = await FriendRequest.exists({
+        $or: [
+            { from: senderId, to: recipientId, status: "accepted" },
+            { from: recipientId, to: senderId, status: "accepted" },
+        ],
+    });
+    const key = conversationMemberKey(senderId, recipientId);
+    let conv = await Conversation.findOne({
+        memberKey: key,
+        $or: [{ kind: "direct" }, { kind: { $exists: false } }],
+    });
+    if (conv) {
+        if (conv.status === "declined" && !isFriend) {
+            throw httpError("This message request was declined. You cannot send additional messages.", 403);
+        }
+        if (conv.status === "pending" && conv.requestedBy?.toString() === senderId) {
+            const existingCount = await Message.countDocuments({
+                conversation: conv._id,
+                sender: senderId,
+            });
+            if (existingCount >= 1) {
+                throw httpError("Cannot send additional messages until your message request is accepted", 403);
+            }
+        }
+        if (isFriend && (conv.status === "declined" || conv.status === "pending")) {
+            conv.status = "active";
+            await conv.save();
+        }
+    }
+    else {
+        conv = await Conversation.create({
+            memberKey: key,
+            kind: "direct",
+            status: isFriend ? "active" : "pending",
+            requestedBy: isFriend ? null : new mongoose.Types.ObjectId(senderId),
+            members: [
+                new mongoose.Types.ObjectId(senderId),
+                new mongoose.Types.ObjectId(recipientId),
+            ].sort((a, b) => a.toString().localeCompare(b.toString())),
+        });
+    }
+    // Unhide for sender
+    await ConversationHide.deleteOne({
+        user: senderId,
+        conversation: conv._id,
+    });
+    const persisted = await persistInboundChatMessage(conv._id.toString(), senderId, text, "text");
+    return {
+        conversationId: conv._id.toString(),
+        status: conv.status || "pending",
+        persisted,
+    };
+}
 export async function acceptMessageRequest(conversationId, userId) {
     const conv = await Conversation.findById(conversationId);
     if (!conv)
@@ -590,9 +780,38 @@ export async function acceptMessageRequest(conversationId, userId) {
     if (!conv.members.some((m) => m.toString() === userId)) {
         throw httpError("Not allowed", 403);
     }
-    conv.status = "active";
+    // Only the recipient can accept; sender cannot accept their own request
+    if (conv.status === "pending" &&
+        conv.requestedBy?.toString() === userId) {
+        throw httpError("You cannot accept your own message request", 403);
+    }
+    conv.status = "accepted";
     await conv.save();
-    return { success: true, conversationId, status: "active" };
+    // Unhide for both members
+    await ConversationHide.deleteMany({
+        conversation: conv._id,
+    });
+    // Notify sender that their request was accepted
+    const senderId = conv.requestedBy?.toString();
+    if (senderId && senderId !== userId) {
+        const recipientUser = await User.findById(userId).select("name").lean();
+        await createNotification({
+            userId: senderId,
+            actorId: userId,
+            title: "Message Request Accepted",
+            body: `${recipientUser?.name || "A user"} accepted your message request.`,
+            kind: "message",
+            refType: "conversation",
+            refId: conversationId,
+            category: "messages",
+        });
+    }
+    return {
+        success: true,
+        conversationId,
+        status: "accepted",
+        requestStatus: "accepted",
+    };
 }
 export async function declineMessageRequest(conversationId, userId) {
     const conv = await Conversation.findById(conversationId);
@@ -601,10 +820,21 @@ export async function declineMessageRequest(conversationId, userId) {
     if (!conv.members.some((m) => m.toString() === userId)) {
         throw httpError("Not allowed", 403);
     }
+    // Only recipient can decline
+    if (conv.status === "pending" &&
+        conv.requestedBy?.toString() === userId) {
+        throw httpError("You cannot decline your own message request", 403);
+    }
     conv.status = "declined";
     await conv.save();
+    // Hide for the recipient so it disappears from their requests
     await ConversationHide.findOneAndUpdate({ user: userId, conversation: conversationId }, {}, { upsert: true });
-    return { success: true, conversationId, status: "declined" };
+    return {
+        success: true,
+        conversationId,
+        status: "declined",
+        requestStatus: "declined",
+    };
 }
 export async function archiveConversation(conversationId, userId, archiveState) {
     const conv = await Conversation.findById(conversationId);
@@ -649,7 +879,11 @@ export async function muteConversation(conversationId, userId, muted, durationMi
     await conv.save();
     return { success: true, conversationId, isMuted: shouldMute, mutedUntil };
 }
-export async function editMessage(conversationId, messageId, userId, newText) {
+export async function editMessage(conversationId, messageId, userId, payload) {
+    const conv = await Conversation.findById(conversationId);
+    if (!conv || !conv.members.some((m) => m.toString() === userId)) {
+        throw httpError("Conversation not found", 404);
+    }
     const msg = await Message.findById(messageId);
     if (!msg || msg.conversation.toString() !== conversationId) {
         throw httpError("Message not found", 404);
@@ -657,21 +891,68 @@ export async function editMessage(conversationId, messageId, userId, newText) {
     if (msg.sender.toString() !== userId) {
         throw httpError("Only sender can edit message", 403);
     }
-    if (!newText?.trim()) {
-        throw httpError("Text cannot be empty", 400);
+    const data = typeof payload === "string" ? { text: payload } : payload || {};
+    const requestedType = data.messageType || msg.messageType || "text";
+    const allowed = ["text", "image", "video", "audio", "file", "system"];
+    const newType = allowed.includes(requestedType)
+        ? requestedType
+        : "text";
+    let fileUrl = typeof data.fileUrl === "string" ? data.fileUrl.trim() : (msg.fileUrl || "");
+    let text = typeof data.text === "string" ? data.text.trim() : "";
+    // If text is a URL and it's a media type without explicit fileUrl
+    if (newType !== "text" && !fileUrl && (text.startsWith("http://") || text.startsWith("https://"))) {
+        fileUrl = text;
     }
-    msg.text = newText.trim();
+    if (newType !== "text") {
+        if (!fileUrl && !msg.fileUrl) {
+            throw httpError("Media URL is required for media message", 400);
+        }
+        if (!text) {
+            if (newType === "image")
+                text = "📷 Image";
+            else if (newType === "video")
+                text = "🎥 Video";
+            else if (newType === "audio")
+                text = "🎵 Audio";
+            else
+                text = "📎 File";
+        }
+        msg.fileUrl = fileUrl || msg.fileUrl;
+        if (typeof data.fileName === "string")
+            msg.fileName = data.fileName;
+        if (typeof data.fileSize === "number")
+            msg.fileSize = data.fileSize;
+        if (typeof data.mimeType === "string")
+            msg.mimeType = data.mimeType;
+        if (typeof data.duration === "number")
+            msg.duration = data.duration;
+    }
+    else {
+        if (!text) {
+            throw httpError("Text cannot be empty", 400);
+        }
+    }
+    msg.text = text;
+    msg.messageType = newType;
     msg.isEdited = true;
     msg.editedAt = new Date();
     await msg.save();
-    return {
-        id: msg._id.toString(),
-        text: msg.text,
-        isEdited: true,
-        editedAt: msg.editedAt,
-    };
+    // If this was the last message of the conversation, update conversation snippet
+    const latest = await Message.findOne({ conversation: conversationId }).sort({ createdAt: -1 });
+    if (latest && latest._id.toString() === messageId) {
+        conv.lastMessageText = text.slice(0, 200);
+        await conv.save();
+    }
+    const populated = await Message.findById(msg._id)
+        .populate("sender", "name avatar")
+        .lean();
+    return mapMessageRow(populated, userId);
 }
 export async function deleteMessage(conversationId, messageId, userId) {
+    const conv = await Conversation.findById(conversationId);
+    if (!conv || !conv.members.some((m) => m.toString() === userId)) {
+        throw httpError("Conversation not found", 404);
+    }
     const msg = await Message.findById(messageId);
     if (!msg || msg.conversation.toString() !== conversationId) {
         throw httpError("Message not found", 404);
@@ -680,7 +961,18 @@ export async function deleteMessage(conversationId, messageId, userId) {
         throw httpError("Only sender can delete message", 403);
     }
     await msg.deleteOne();
-    return { success: true, messageId };
+    // Update conversation's last message if this was the latest message
+    const newLatest = await Message.findOne({ conversation: conversationId }).sort({ createdAt: -1 });
+    if (newLatest) {
+        conv.lastMessageText = newLatest.text.slice(0, 200);
+        conv.lastMessageAt = newLatest.createdAt;
+    }
+    else {
+        conv.lastMessageText = "";
+        conv.lastMessageAt = null;
+    }
+    await conv.save();
+    return { success: true, conversationId, messageId };
 }
 function mapMessageRow(m, viewerId) {
     const pop = m.sender;
@@ -697,11 +989,14 @@ function mapMessageRow(m, viewerId) {
         senderAvatar = d.avatar ?? "";
     }
     else {
-        senderId = pop.toString();
+        senderId = pop?.toString?.() || "";
     }
     const isMe = senderId === viewerId;
     return {
         id: m._id.toString(),
+        _id: m._id.toString(),
+        conversationId: m.conversation?.toString?.() || "",
+        clientMessageId: m.clientMessageId || null,
         text: m.text,
         messageType: m.messageType ?? "text",
         isEdited: Boolean(m.isEdited),
@@ -726,22 +1021,110 @@ export async function listMessages(conversationId, userId, opts) {
     }
     const limit = Math.min(100, Math.max(1, opts?.limit ?? 50));
     const filter = { conversation: conversationId };
-    if (opts?.before) {
-        const beforeMsg = await Message.findById(opts.before);
-        if (beforeMsg)
-            filter.createdAt = { $lt: beforeMsg.createdAt };
+    const cursorVal = opts?.cursor || opts?.before;
+    if (cursorVal) {
+        if (mongoose.isValidObjectId(cursorVal)) {
+            const cursorMsg = await Message.findById(cursorVal);
+            if (cursorMsg) {
+                filter.$or = [
+                    { createdAt: { $lt: cursorMsg.createdAt } },
+                    { createdAt: cursorMsg.createdAt, _id: { $lt: cursorMsg._id } },
+                ];
+            }
+        }
+        else if (!isNaN(Date.parse(cursorVal))) {
+            filter.createdAt = { $lt: new Date(cursorVal) };
+        }
     }
-    const msgs = await Message.find(filter)
-        .sort({ createdAt: -1 })
-        .limit(limit)
+    const rawMsgs = await Message.find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(limit + 1)
         .populate("sender", "name avatar")
         .lean();
-    return msgs.reverse().map((m) => mapMessageRow(m, userId));
+    const hasMore = rawMsgs.length > limit;
+    const sliced = hasMore ? rawMsgs.slice(0, limit) : rawMsgs;
+    const nextCursor = hasMore && sliced.length > 0
+        ? sliced[sliced.length - 1]._id.toString()
+        : null;
+    const messages = sliced.reverse().map((m) => mapMessageRow(m, userId));
+    return {
+        messages,
+        pagination: {
+            hasMore,
+            nextCursor,
+        },
+    };
 }
 export async function persistInboundChatMessage(conversationId, senderId, text, messageType = "text", metadata) {
     const conv = await Conversation.findById(conversationId);
     if (!conv || !conv.members.some((m) => m.toString() === senderId)) {
         throw httpError("Conversation not found", 404);
+    }
+    // Idempotency check: if message with this clientMessageId was already saved for this sender & conversation, return it
+    const clientMessageId = typeof metadata?.clientMessageId === "string" && metadata.clientMessageId.trim()
+        ? metadata.clientMessageId.trim()
+        : undefined;
+    if (clientMessageId) {
+        const existing = await Message.findOne({
+            conversation: conversationId,
+            sender: senderId,
+            clientMessageId,
+        })
+            .populate("sender", "name avatar")
+            .lean();
+        if (existing) {
+            const s = existing.sender;
+            const senderUserId = s?._id?.toString() ?? senderId;
+            const socketPayload = {
+                _id: existing._id.toString(),
+                conversation: conversationId,
+                text: existing.text,
+                messageType: existing.messageType ?? "text",
+                isEdited: Boolean(existing.isEdited),
+                editedAt: existing.editedAt || null,
+                fileUrl: existing.fileUrl || "",
+                fileName: existing.fileName || "",
+                fileSize: existing.fileSize || 0,
+                mimeType: existing.mimeType || "",
+                duration: existing.duration || 0,
+                clientMessageId: existing.clientMessageId || clientMessageId,
+                createdAt: existing.createdAt,
+                sender: {
+                    _id: senderUserId,
+                    name: s?.name ?? "",
+                    avatar: s?.avatar ?? "",
+                },
+            };
+            const restForSender = mapMessageRow(existing, senderId);
+            return {
+                socketPayload,
+                restForSender,
+                memberUserIds: conv.members.map((m) => m.toString()),
+                isDuplicate: true,
+            };
+        }
+    }
+    // 1. If conversation status is declined, prevent sending messages
+    if (conv.status === "declined") {
+        throw httpError("This message request was declined. You cannot send additional messages.", 403);
+    }
+    // 2. If conversation status is pending, enforce 1-message rule for sender
+    if (conv.status === "pending") {
+        const isRequester = conv.requestedBy?.toString() === senderId;
+        if (isRequester) {
+            const existingCount = await Message.countDocuments({
+                conversation: conversationId,
+                sender: senderId,
+            });
+            if (existingCount >= 1) {
+                throw httpError("Cannot send additional messages until your message request is accepted", 403);
+            }
+        }
+        else {
+            // Recipient replied! Auto-accept the message request and unhide
+            conv.status = "accepted";
+            await ConversationHide.deleteMany({ conversation: conv._id });
+        }
     }
     let trimmed = typeof text === "string" ? text.trim() : "";
     if (!trimmed) {
@@ -766,6 +1149,7 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
     const msg = await Message.create({
         conversation: conversationId,
         sender: senderId,
+        clientMessageId,
         text: trimmed,
         messageType: mt,
         fileUrl: metadata?.fileUrl || "",
@@ -781,10 +1165,6 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
         conv.lastReadAt = new Map(Object.entries(conv.lastReadAt || {}));
     }
     conv.lastReadAt.set(senderId, new Date());
-    // Auto-activate request if it was pending and recipient replied
-    if (conv.status === "pending" && conv.requestedBy?.toString() !== senderId) {
-        conv.status = "active";
-    }
     await conv.save();
     const populated = await Message.findById(msg._id)
         .populate("sender", "name avatar")
@@ -802,7 +1182,11 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
         await createNotification({
             userId: midStr,
             actorId: senderId,
-            title: conv.kind === "group" ? (conv.title || "Group Chat") : "New message",
+            title: conv.kind === "group"
+                ? conv.title || "Group Chat"
+                : conv.status === "pending"
+                    ? "New message request"
+                    : "New message",
             body: trimmed.slice(0, 120),
             kind: "message",
             refType: "conversation",
@@ -816,11 +1200,13 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
         text: msg.text,
         messageType: mt,
         isEdited: false,
+        editedAt: null,
         fileUrl: msg.fileUrl || "",
         fileName: msg.fileName || "",
         fileSize: msg.fileSize || 0,
         mimeType: msg.mimeType || "",
         duration: msg.duration || 0,
+        clientMessageId: msg.clientMessageId || null,
         createdAt: msg.createdAt,
         sender: {
             _id: senderUserId,
@@ -830,9 +1216,13 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
     };
     const restForSender = {
         id: msg._id.toString(),
+        _id: msg._id.toString(),
+        conversationId,
+        clientMessageId: msg.clientMessageId || null,
         text: msg.text,
         messageType: mt,
         isEdited: false,
+        editedAt: null,
         fileUrl: msg.fileUrl || "",
         fileName: msg.fileName || "",
         fileSize: msg.fileSize || 0,
@@ -849,6 +1239,7 @@ export async function persistInboundChatMessage(conversationId, senderId, text, 
         socketPayload,
         restForSender,
         memberUserIds: conv.members.map((m) => m.toString()),
+        isDuplicate: false,
     };
 }
 /** @deprecated use persistInboundChatMessage + emit layer */

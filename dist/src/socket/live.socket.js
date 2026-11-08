@@ -174,15 +174,18 @@ export function registerLiveSocket(io) {
         socket.on("host-heartbeat", async (data) => {
             const scope = data?.scope;
             const entityId = data?.entityId;
-            if ((scope !== "church" && scope !== "group") ||
-                !entityId ||
-                !mongoose.isValidObjectId(entityId)) {
+            const sessionId = data?.sessionId;
+            if (!sessionId &&
+                ((scope !== "church" && scope !== "group") ||
+                    !entityId ||
+                    !mongoose.isValidObjectId(entityId))) {
                 return;
             }
             try {
                 await touchHostHeartbeat({
                     scope,
                     entityId,
+                    sessionId,
                     userId,
                 });
                 socket.emit("host-heartbeat-ack", { ok: true });

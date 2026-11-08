@@ -10,6 +10,12 @@ const messageSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
         required: true,
+        index: true,
+    },
+    clientMessageId: {
+        type: String,
+        sparse: true,
+        index: true,
     },
     text: { type: String, required: true, trim: true, maxlength: 8000 },
     messageType: {
@@ -25,5 +31,6 @@ const messageSchema = new mongoose.Schema({
     mimeType: { type: String, default: "" },
     duration: { type: Number, default: 0 },
 }, { timestamps: true });
-messageSchema.index({ conversation: 1, createdAt: -1 });
+messageSchema.index({ conversation: 1, createdAt: -1, _id: -1 });
+messageSchema.index({ conversation: 1, sender: 1, clientMessageId: 1 }, { sparse: true });
 export const Message = mongoose.model("Message", messageSchema);

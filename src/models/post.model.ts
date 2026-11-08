@@ -22,6 +22,13 @@ const postSchema = new mongoose.Schema(
     video: { type: String, default: "" },
     videos: { type: [String], default: [] },
     videoThumbnail: { type: String, default: "" },
+    media: [
+      {
+        type: { type: String, enum: ["image", "video"], default: "image" },
+        url: { type: String, default: "" },
+        thumbnail: { type: String, default: "" },
+      },
+    ],
     mode: {
       type: String,
       enum: ["prayer", "praise"],

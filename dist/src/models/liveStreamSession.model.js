@@ -35,6 +35,15 @@ const liveStreamSessionSchema = new mongoose.Schema({
         ref: "User",
         default: null,
     },
+    recordingResourceId: { type: String, default: null },
+    recordingSid: { type: String, default: null },
+    recordingStatus: {
+        type: String,
+        enum: ["none", "acquiring", "recording", "stopped", "failed"],
+        default: "none",
+    },
+    replayUrl: { type: String, default: null },
+    durationSeconds: { type: Number, default: 0 },
 }, { timestamps: true });
 liveStreamSessionSchema.index({ churchId: 1, status: 1 }, { partialFilterExpression: { status: "live", churchId: { $type: "objectId" } } });
 liveStreamSessionSchema.index({ groupId: 1, status: 1 }, { partialFilterExpression: { status: "live", groupId: { $type: "objectId" } } });

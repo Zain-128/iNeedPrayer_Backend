@@ -240,12 +240,16 @@ export const search = async (req, res) => {
             const posts = await attachPostScopes(result.posts);
             return res.json({
                 q,
+                query: q,
                 type,
                 page: result.page,
                 limit: result.limit,
                 total: result.total,
                 totalPages: Math.max(1, Math.ceil(result.total / result.limit)),
                 posts,
+                results: {
+                    posts,
+                },
             });
         }
         if (type === "people") {
@@ -294,8 +298,11 @@ export const search = async (req, res) => {
             churchesService.listChurches({ userId: req.userId, q }),
         ]);
         const posts = await attachPostScopes(postsResult.posts);
+        const churchesPreview = churchesAll.slice(0, limit);
+        const groupsPreview = groupsAll.slice(0, limit);
         return res.json({
             q,
+            query: q,
             type,
             page,
             limit,
@@ -307,8 +314,14 @@ export const search = async (req, res) => {
             },
             people: peopleAll,
             posts,
-            groups: groupsAll.slice(0, limit),
-            churches: churchesAll.slice(0, limit),
+            groups: groupsPreview,
+            churches: churchesPreview,
+            results: {
+                people: peopleAll,
+                posts,
+                groups: groupsPreview,
+                churches: churchesPreview,
+            },
         });
     }
     catch (err) {

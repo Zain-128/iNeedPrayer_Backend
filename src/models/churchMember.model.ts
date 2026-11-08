@@ -14,7 +14,7 @@ const churchMemberSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["owner", "admin", "member"],
+      enum: ["owner", "admin", "editor", "member"],
       default: "member",
     },
   },

@@ -26,11 +26,21 @@ const churchEventSchema = new mongoose.Schema(
     maxAttendees: { type: Number, default: 0 },
     meetingUrl: { type: String, default: "" },
     coverImage: { type: String, default: "" },
+    startTime: { type: String, default: "" },
+    endTime: { type: String, default: "" },
+    timezone: { type: String, default: "UTC" },
+    eventType: { type: String, default: "in_person" },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     tags: [{ type: String }],
   },
   { timestamps: true }
 );
 
+churchEventSchema.index({ churchId: 1, eventDate: -1 });
 churchEventSchema.index({ createdAt: -1 });
 churchEventSchema.index({ status: 1 });
 churchEventSchema.index({ eventDate: -1 });

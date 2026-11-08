@@ -206,6 +206,109 @@ export const updateMemberRole = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const inviteFollowers = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.churchId || req.params.id);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+
+    const { userIds, emails } = req.body ?? {};
+    const ids = Array.isArray(userIds)
+      ? userIds.filter((x: unknown) => typeof x === "string")
+      : typeof req.body.userId === "string"
+      ? [req.body.userId]
+      : [];
+    const mail = Array.isArray(emails)
+      ? emails.filter((x: unknown) => typeof x === "string")
+      : [];
+
+    const result = await churchesService.inviteUsersToChurch(
+      churchId,
+      req.userId,
+      { userIds: ids, emails: mail }
+    );
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const listInvites = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.churchId || req.params.id);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+
+    const raw = typeof req.query.status === "string" ? req.query.status : "all";
+    const status =
+      raw === "pending" ||
+      raw === "accepted" ||
+      raw === "rejected" ||
+      raw === "all"
+        ? raw
+        : "all";
+
+    const invites = await churchesService.listChurchInvites(
+      churchId,
+      req.userId,
+      status
+    );
+    return res.json({ invites });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const cancelInvite = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.churchId || req.params.id);
+    const userId = paramStr(req.params.userId);
+    if (!mongoose.isValidObjectId(churchId) || !mongoose.isValidObjectId(userId)) {
+      return invalidId(res);
+    }
+    const result = await churchesService.cancelChurchInvite(
+      churchId,
+      req.userId,
+      userId
+    );
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const acceptInvite = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.churchId || req.params.id);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+
+    const result = await churchesService.acceptChurchInvite(churchId, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const declineInvite = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.churchId || req.params.id);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+
+    const result = await churchesService.declineChurchInvite(churchId, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
 /**
  * Search nearby churches using Google Places API (New)
  * Supports both GET (query parameters) and POST (JSON body)
@@ -400,6 +503,296 @@ export const getGooglePlaceDetails = async (req: Request, res: Response) => {
       success: false,
       message: e.message || "Failed to fetch place details",
     });
+  }
+};
+
+export const getPermissions = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const result = await churchesService.getUserChurchPermissions(churchId, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const getRoleLimits = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const result = await churchesService.getChurchRoleLimits(churchId, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const listStaff = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const result = await churchesService.listChurchStaff(churchId, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const addStaff = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const result = await churchesService.addChurchStaff(churchId, req.userId, req.body ?? {});
+    return res.status(201).json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const updateStaffRole = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    const userId = paramStr(req.params.userId);
+    if (!mongoose.isValidObjectId(churchId) || !mongoose.isValidObjectId(userId)) return invalidId(res);
+    const result = await churchesService.updateChurchStaffRole(
+      churchId,
+      req.userId,
+      userId,
+      req.body?.role
+    );
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const removeStaff = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    const userId = paramStr(req.params.userId);
+    if (!mongoose.isValidObjectId(churchId) || !mongoose.isValidObjectId(userId)) return invalidId(res);
+    const result = await churchesService.removeChurchStaff(churchId, req.userId, userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const unfollowChurch = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const result = await churchesService.unfollowChurch(req.userId, churchId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const listInviteCandidates = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const q = typeof req.query.q === "string" ? req.query.q : undefined;
+    const result = await churchesService.listChurchInviteCandidates(churchId, req.userId, q);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const listSentFollowInvites = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const status = typeof req.query.status === "string" ? req.query.status : "all";
+    const result = await churchesService.listSentChurchFollowInvites(churchId, req.userId, status);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const listReceivedFollowInvites = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const result = await churchesService.listReceivedChurchFollowInvites(req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const acceptFollowInvite = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const paramId = paramStr(req.params.id || req.params.churchId || req.params.inviteId);
+    const explicitInviteId = paramStr(req.params.inviteId);
+    const result = await churchesService.acceptChurchFollowInvite(paramId, req.userId, explicitInviteId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const declineFollowInvite = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const paramId = paramStr(req.params.id || req.params.churchId || req.params.inviteId);
+    const explicitInviteId = paramStr(req.params.inviteId);
+    const result = await churchesService.declineChurchFollowInvite(paramId, req.userId, explicitInviteId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const cancelFollowInvite = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const paramId = paramStr(req.params.id || req.params.churchId || req.params.inviteId);
+    const explicitInviteId = paramStr(req.params.inviteId);
+    const result = await churchesService.cancelChurchFollowInvite(paramId, req.userId, explicitInviteId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const resendFollowInvite = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const paramId = paramStr(req.params.id || req.params.churchId || req.params.inviteId);
+    const explicitInviteId = paramStr(req.params.inviteId);
+    const result = await churchesService.resendChurchFollowInvite(paramId, req.userId, explicitInviteId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const listEvents = async (req: Request, res: Response) => {
+  try {
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const filter = typeof req.query.filter === "string" ? req.query.filter : undefined;
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    const page = req.query.page ? parseInt(String(req.query.page), 10) : undefined;
+    const result = await churchesService.listChurchEvents(churchId, { filter, status, limit, page });
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const getEvent = async (req: Request, res: Response) => {
+  try {
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    const eventId = paramStr(req.params.eventId);
+    if (!mongoose.isValidObjectId(churchId) || !mongoose.isValidObjectId(eventId)) return invalidId(res);
+    const result = await churchesService.getChurchEvent(churchId, eventId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const createEvent = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const result = await churchesService.createChurchEvent(churchId, req.userId, req.body ?? {});
+    return res.status(201).json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const updateEvent = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    const eventId = paramStr(req.params.eventId);
+    if (!mongoose.isValidObjectId(churchId) || !mongoose.isValidObjectId(eventId)) return invalidId(res);
+    const result = await churchesService.updateChurchEvent(churchId, eventId, req.userId, req.body ?? {});
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const deleteEvent = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    const eventId = paramStr(req.params.eventId);
+    if (!mongoose.isValidObjectId(churchId) || !mongoose.isValidObjectId(eventId)) return invalidId(res);
+    const result = await churchesService.deleteChurchEvent(churchId, eventId, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const getLiveSettings = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const result = await churchesService.getLiveStreamSettings("church", churchId, req.userId);
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const updateLiveSettings = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const churchId = paramStr(req.params.id || req.params.churchId);
+    if (!mongoose.isValidObjectId(churchId)) return invalidId(res);
+    const result = await churchesService.updateLiveStreamSettings(
+      "church",
+      churchId,
+      req.userId,
+      req.body ?? {}
+    );
+    return res.json(result);
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
   }
 };
 

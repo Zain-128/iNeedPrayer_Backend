@@ -363,8 +363,14 @@ export const forgotPassword = async (
 
   const lastRequested = user.passwordResetRequestedAt?.getTime() ?? 0;
   if (Date.now() - lastRequested < RESET_RESEND_COOLDOWN_MS) {
-    console.log(`[auth] Password reset for ${normalizedEmail} throttled (cooldown)`);
-    return { message: FORGOT_PASSWORD_MESSAGE };
+    const waitSeconds = Math.max(
+      1,
+      Math.ceil((RESET_RESEND_COOLDOWN_MS - (Date.now() - lastRequested)) / 1000)
+    );
+    console.log(`[auth] Password reset for ${normalizedEmail} throttled (${waitSeconds}s left)`);
+    const err = new Error(`Please wait ${waitSeconds}s before requesting another reset code.`);
+    (err as Error & { statusCode?: number }).statusCode = 429;
+    throw err;
   }
 
   const code = crypto.randomInt(0, 10_000).toString().padStart(4, "0");

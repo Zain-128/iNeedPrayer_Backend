@@ -27,10 +27,90 @@ export const listConversations = async (req: AuthRequest, res: Response) => {
 export const listRequests = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
-    const requests = await chatService.listConversations(req.userId, {
-      tab: "requests",
+    const tab = (typeof req.query.tab === "string" ? req.query.tab : "incoming") as
+      | "incoming"
+      | "outgoing"
+      | "sent"
+      | "all";
+    const requests = await chatService.listMessageRequests(req.userId, { tab });
+    return res.json({ requests, conversations: requests });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const listIncomingRequests = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const requests = await chatService.listMessageRequests(req.userId, {
+      tab: "incoming",
     });
     return res.json({ requests, conversations: requests });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const listOutgoingRequests = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const requests = await chatService.listMessageRequests(req.userId, {
+      tab: "outgoing",
+    });
+    return res.json({ requests, conversations: requests });
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    return res.status(e.statusCode ?? 500).json({ message: e.message });
+  }
+};
+
+export const createRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.userId) return res.status(401).json({ message: "Unauthorized" });
+    const recipientId =
+      req.body?.recipientId || req.body?.peerUserId || req.body?.userId;
+    const text = req.body?.text || req.body?.message;
+    if (
+      !recipientId ||
+      typeof recipientId !== "string" ||
+      !mongoose.isValidObjectId(recipientId)
+    ) {
+      return res.status(400).json({ message: "Valid recipientId required" });
+    }
+    if (!text || typeof text !== "string" || !text.trim()) {
+      return res
+        .status(400)
+        .json({ message: "Initial message text is required" });
+    }
+    const result = await chatService.createMessageRequest(
+      req.userId,
+      recipientId,
+      text.trim()
+    );
+    const io = getIo();
+    if (io) {
+      if (result.persisted?.socketPayload) {
+        broadcastNewMessage(
+          io,
+          result.conversationId,
+          result.persisted.socketPayload
+        );
+      }
+      await broadcastChatUpdated(io, result.conversationId);
+      io.to(`user:${recipientId}`).emit("new-message-request", {
+        conversationId: result.conversationId,
+        status: result.status,
+      });
+    }
+    return res.status(201).json({
+      message: "Message request sent successfully",
+      conversationId: result.conversationId,
+      status: result.status,
+      requestStatus: result.status,
+      chatMessage: result.persisted?.restForSender,
+    });
   } catch (err) {
     const e = err as Error & { statusCode?: number };
     return res.status(e.statusCode ?? 500).json({ message: e.message });
@@ -320,6 +400,7 @@ export const acceptRequest = async (req: AuthRequest, res: Response) => {
     const result = await chatService.acceptMessageRequest(id, req.userId);
     const io = getIo();
     if (io) {
+      io.to(`chat:${id}`).emit("message-request-accepted", result);
       await broadcastChatUpdated(io, id);
     }
     return res.json(result);
@@ -339,6 +420,7 @@ export const declineRequest = async (req: AuthRequest, res: Response) => {
     const result = await chatService.declineMessageRequest(id, req.userId);
     const io = getIo();
     if (io) {
+      io.to(`chat:${id}`).emit("message-request-declined", result);
       await broadcastChatUpdated(io, id);
     }
     return res.json(result);
@@ -402,13 +484,16 @@ export const listMessages = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: "Invalid id" });
     }
     const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const cursor =
+      typeof req.query.cursor === "string" ? req.query.cursor : undefined;
     const before =
       typeof req.query.before === "string" ? req.query.before : undefined;
-    const messages = await chatService.listMessages(id, req.userId, {
+    const result = await chatService.listMessages(id, req.userId, {
       limit,
+      cursor,
       before,
     });
-    return res.json({ messages });
+    return res.json(result);
   } catch (err) {
     const e = err as Error & { statusCode?: number };
     return res.status(e.statusCode ?? 500).json({ message: e.message });
@@ -431,6 +516,7 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       mimeType,
       duration,
       metadata,
+      clientMessageId,
     } = req.body ?? {};
 
     const effectiveFileUrl =
@@ -439,6 +525,14 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
         : typeof metadata?.fileUrl === "string"
         ? metadata.fileUrl.trim()
         : "";
+
+    const effectiveClientMessageId =
+      typeof clientMessageId === "string" && clientMessageId.trim()
+        ? clientMessageId.trim()
+        : typeof metadata?.clientMessageId === "string" &&
+          metadata.clientMessageId.trim()
+        ? metadata.clientMessageId.trim()
+        : undefined;
 
     const hasText = typeof text === "string" && text.trim().length > 0;
     if (!hasText && !effectiveFileUrl) {
@@ -451,6 +545,7 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       typeof text === "string" ? text : "",
       typeof messageType === "string" ? messageType : "text",
       {
+        clientMessageId: effectiveClientMessageId,
         fileUrl: effectiveFileUrl,
         fileName:
           typeof fileName === "string"
@@ -479,11 +574,14 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       }
     );
     const io = getIo();
-    if (io) {
+    if (io && !persisted.isDuplicate) {
       broadcastNewMessage(io, id, persisted.socketPayload);
       await broadcastChatUpdated(io, id);
     }
-    return res.status(201).json({ message: persisted.restForSender });
+    return res.status(persisted.isDuplicate ? 200 : 201).json({
+      message: persisted.restForSender,
+      isDuplicate: !!persisted.isDuplicate,
+    });
   } catch (err) {
     const e = err as Error & { statusCode?: number };
     return res.status(e.statusCode ?? 500).json({ message: e.message });
@@ -498,25 +596,38 @@ export const editMessage = async (req: AuthRequest, res: Response) => {
     if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(messageId)) {
       return res.status(400).json({ message: "Invalid id" });
     }
-    const { text } = req.body ?? {};
-    if (!text || typeof text !== "string" || !text.trim()) {
-      return res.status(400).json({ message: "text is required" });
-    }
-    const result = await chatService.editMessage(
-      id,
-      messageId,
-      req.userId,
-      text.trim()
-    );
+    const {
+      text,
+      messageType,
+      fileUrl,
+      fileName,
+      fileSize,
+      mimeType,
+      duration,
+    } = req.body ?? {};
+
+    const updated = await chatService.editMessage(id, messageId, req.userId, {
+      text,
+      messageType,
+      fileUrl,
+      fileName,
+      fileSize,
+      mimeType,
+      duration,
+    });
+
     const io = getIo();
     if (io) {
-      io.to(`chat:${id}`).emit("message-edited", {
+      const editPayload = {
         conversationId: id,
-        message: result,
-      });
+        messageId,
+        message: updated,
+      };
+      io.to(`chat:${id}`).emit("message:updated", editPayload);
+      io.to(`chat:${id}`).emit("message-edited", editPayload);
       await broadcastChatUpdated(io, id);
     }
-    return res.json(result);
+    return res.json({ message: updated, ...updated });
   } catch (err) {
     const e = err as Error & { statusCode?: number };
     return res.status(e.statusCode ?? 500).json({ message: e.message });
@@ -534,10 +645,12 @@ export const deleteMessage = async (req: AuthRequest, res: Response) => {
     const result = await chatService.deleteMessage(id, messageId, req.userId);
     const io = getIo();
     if (io) {
-      io.to(`chat:${id}`).emit("message-deleted", {
+      const deletePayload = {
         conversationId: id,
         messageId,
-      });
+      };
+      io.to(`chat:${id}`).emit("message:deleted", deletePayload);
+      io.to(`chat:${id}`).emit("message-deleted", deletePayload);
       await broadcastChatUpdated(io, id);
     }
     return res.json(result);
