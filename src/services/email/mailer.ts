@@ -283,8 +283,8 @@ export async function sendEmail(
       text: content.text,
       headers: {
         "X-Mailer": "iNeedPrayer-Mailer/2.0",
-        "Precedence": "bulk",
-        "Auto-Submitted": "auto-generated",
+        "X-Priority": "3",
+        "X-Auto-Response-Suppress": "OOF, AutoReply",
       },
     });
 

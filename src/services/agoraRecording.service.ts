@@ -8,6 +8,7 @@ import {
   AGORA_RECORDING_ACCESS_KEY,
   AGORA_RECORDING_SECRET_KEY,
   AGORA_RECORDING_PUBLIC_BASE_URL,
+  AGORA_RECORDING_STORAGE_ENDPOINT,
 } from "../contants.js";
 import { buildRtcToken } from "./agora.service.js";
 import { ILiveStreamSession, LiveStreamSession } from "../models/liveStreamSession.model.js";
@@ -124,14 +125,34 @@ export async function startCloudRecording(
         recordingFileConfig: {
           avFileType: ["hls", "mp4"],
         },
-        storageConfig: {
-          vendor: AGORA_RECORDING_VENDOR,
-          region: AGORA_RECORDING_REGION,
-          bucket: AGORA_RECORDING_BUCKET,
-          accessKey: AGORA_RECORDING_ACCESS_KEY,
-          secretKey: AGORA_RECORDING_SECRET_KEY,
-          fileNamePrefix: ["recordings", channelName],
-        },
+        storageConfig: (() => {
+          const rawEndpoint = (AGORA_RECORDING_STORAGE_ENDPOINT || "")
+            .replace(/^https?:\/\//, "")
+            .replace(/\/$/, "");
+          const isCustomS3 = Boolean(
+            rawEndpoint &&
+              (rawEndpoint.includes("backblaze") ||
+                rawEndpoint.includes("b2") ||
+                AGORA_RECORDING_VENDOR === 11)
+          );
+
+          const config: Record<string, unknown> = {
+            vendor: isCustomS3 ? 11 : AGORA_RECORDING_VENDOR,
+            region: isCustomS3 ? 0 : AGORA_RECORDING_REGION,
+            bucket: AGORA_RECORDING_BUCKET,
+            accessKey: AGORA_RECORDING_ACCESS_KEY,
+            secretKey: AGORA_RECORDING_SECRET_KEY,
+            fileNamePrefix: ["recordings", channelName],
+          };
+
+          if (isCustomS3 && rawEndpoint) {
+            config.extensionParams = {
+              endpoint: rawEndpoint,
+            };
+          }
+
+          return config;
+        })(),
       },
     }),
   });

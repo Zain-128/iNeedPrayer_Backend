@@ -62,6 +62,12 @@ router.post("/reset-circuit-breaker", (_req, res) => {
  * Safe test send endpoint: sends a single verification test email to a given recipient.
  */
 router.post("/send-test-email", async (req, res) => {
+  // Protect in production from automated crawlers / spam abuse
+  const secret = (req.headers["x-test-secret"] || req.query.secret || req.body?.secret);
+  if (process.env.NODE_ENV === "production" && (!process.env.TEST_SECRET || secret !== process.env.TEST_SECRET)) {
+    return res.status(403).json({ success: false, message: "Forbidden in production. Provide valid x-test-secret header." });
+  }
+
   const { email } = req.body ?? {};
   if (!email || typeof email !== "string") {
     return res.status(400).json({ success: false, message: "Please provide a valid recipient email." });
