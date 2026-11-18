@@ -163,6 +163,15 @@ export const STRIPE_SECRET_KEY = (process.env.STRIPE_SECRET_KEY ?? "").trim();
 export const STRIPE_WEBHOOK_SECRET = (process.env.STRIPE_WEBHOOK_SECRET ?? "").trim();
 export const STRIPE_PRICE_MONTHLY = (process.env.STRIPE_PRICE_MONTHLY ?? "").trim();
 export const STRIPE_PRICE_YEARLY = (process.env.STRIPE_PRICE_YEARLY ?? "").trim();
+/** Twilio SMS Configuration */
+export const TWILIO_ACCOUNT_SID = (process.env.TWILIO_ACCOUNT_SID ?? "").trim();
+export const TWILIO_AUTH_TOKEN = (process.env.TWILIO_AUTH_TOKEN ?? "").trim();
+export const TWILIO_PHONE_NUMBER = (process.env.TWILIO_PHONE_NUMBER ??
+    process.env.TWILIO_FROM_NUMBER ??
+    "").trim();
+export function isTwilioConfigured() {
+    return Boolean(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER);
+}
 export const COINS_PACKAGES = [
     {
         name: "Starter",

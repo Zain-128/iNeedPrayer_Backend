@@ -24,42 +24,9 @@ function isChurchStubCode(code) {
         trimmed === "12345" ||
         trimmed === "1234");
 }
+import { sendVerificationSms } from "./sms.service.js";
 async function sendChurchVerificationSms(phone, churchName, code) {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const fromNumber = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM_NUMBER;
-    const bodyText = `Your verification code for ${churchName} on I Need Prayer is: ${code}. Valid for 15 minutes.`;
-    if (accountSid && authToken && fromNumber) {
-        try {
-            const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
-            const params = new URLSearchParams({
-                To: phone,
-                From: fromNumber,
-                Body: bodyText,
-            });
-            const res = await fetch(url, {
-                method: "POST",
-                headers: {
-                    Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: params.toString(),
-            });
-            if (!res.ok) {
-                const errText = await res.text();
-                console.warn(`Twilio SMS failed with HTTP ${res.status}:`, errText);
-            }
-            else {
-                console.log(`[CHURCH VERIFICATION SMS] Sent successfully to ${phone}`);
-            }
-        }
-        catch (e) {
-            console.warn("Twilio SMS send error:", e?.message);
-        }
-    }
-    else {
-        console.log(`[CHURCH VERIFICATION SMS (SIMULATED)] Phone: ${phone} | Church: "${churchName}" | Code: ${code} (Default code: 12345)`);
-    }
+    await sendVerificationSms(phone, code, churchName);
 }
 import { formatCountLabel } from "../utils/mappers.js";
 import { normalizeChurchInput, validateCreateChurchInput, } from "../utils/churchInput.js";

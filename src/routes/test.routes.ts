@@ -112,6 +112,29 @@ router.post("/send-test-email", async (req, res) => {
 });
 
 /**
+ * Safe test SMS send endpoint.
+ */
+router.post("/send-test-sms", async (req, res) => {
+  const secret = (req.headers["x-test-secret"] || req.query.secret || req.body?.secret);
+  if (process.env.NODE_ENV === "production" && (!process.env.TEST_SECRET || secret !== process.env.TEST_SECRET)) {
+    return res.status(403).json({ success: false, message: "Forbidden in production. Provide valid x-test-secret header." });
+  }
+
+  const { phone, message } = req.body ?? {};
+  if (!phone || typeof phone !== "string") {
+    return res.status(400).json({ success: false, message: "Please provide a valid recipient phone number." });
+  }
+
+  const { sendSms } = await import("../services/sms.service.js");
+  const result = await sendSms(phone, message || "This is a verification test SMS from I Need Prayer.");
+  if (result.success) {
+    return res.json({ success: true, message: `Test SMS sent to ${phone}`, sid: result.sid, simulated: result.simulated });
+  } else {
+    return res.status(502).json({ success: false, message: result.error || "Failed to send SMS." });
+  }
+});
+
+/**
  * Diagnostic endpoint: returns Google Play Coin Packages configuration and wallet credit mapping.
  */
 router.get("/google-play-packages", (_req, res) => {
