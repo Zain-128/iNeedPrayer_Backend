@@ -73,6 +73,11 @@ if (STRIPE_WEBHOOK_SECRET) {
             event.data.object as Stripe.Checkout.Session
           );
           break;
+        case "invoice.payment_succeeded":
+          await stripeService.handleInvoicePaymentSucceeded(
+            event.data.object as Stripe.Invoice
+          );
+          break;
         case "customer.subscription.deleted":
           await stripeService.handleSubscriptionDeleted(
             event.data.object as Stripe.Subscription

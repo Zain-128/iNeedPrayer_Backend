@@ -333,6 +333,47 @@ export async function handleSubscriptionDeleted(subscription: Stripe.Subscriptio
   }
 }
 
+export async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
+  const inv = invoice as any;
+  const subId =
+    typeof inv.subscription === "string"
+      ? inv.subscription
+      : inv.subscription?.id;
+
+  if (!subId) return;
+
+  const userSub = await UserSubscription.findOne({
+    $or: [{ transactionId: subId }, { stripeSubscriptionId: subId }],
+  });
+
+  if (userSub) {
+    const newExpiry = new Date(userSub.expiryDate || new Date());
+    if (userSub.billing === "Yearly") {
+      newExpiry.setFullYear(newExpiry.getFullYear() + 1);
+    } else {
+      newExpiry.setMonth(newExpiry.getMonth() + 1);
+    }
+
+    userSub.expiryDate = newExpiry;
+    userSub.paymentStatus = "Paid";
+    userSub.status = "Active";
+    userSub.autoRenew = true;
+    await userSub.save();
+
+    const user = await User.findById(userSub.user).select("name email").lean();
+    await PlatformTransaction.create({
+      user: userSub.user,
+      userName: user?.name ?? "",
+      email: user?.email ?? "",
+      type: "Subscription",
+      amountCents: invoice.amount_paid ?? 0,
+      transactionId: (inv.payment_intent as string) || invoice.id,
+      status: "Completed",
+      description: `${userSub.planName || "Subscription"} auto-renewal`,
+    });
+  }
+}
+
 /* ─── User Queries ─── */
 
 export async function getUserSubscription(userId: string) {
