@@ -6,8 +6,42 @@ function getAppleBundleId(): string {
   return (
     process.env.APPLE_BUNDLE_ID ||
     process.env.IOS_BUNDLE_ID ||
-    "com.ineedprayer.app"
+    "com.shawntorres.ineedprayer"
   );
+}
+
+export function loadApplePrivateKey(): string | null {
+  const customPath = process.env.APPLE_PRIVATE_KEY_PATH;
+  if (customPath) {
+    const full = path.isAbsolute(customPath)
+      ? customPath
+      : path.join(process.cwd(), customPath);
+    if (fs.existsSync(full)) {
+      try {
+        return fs.readFileSync(full, "utf8");
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  const defaultPath = path.join(process.cwd(), "keys", "AuthKey_C8MH789N2T.p8");
+  if (fs.existsSync(defaultPath)) {
+    try {
+      return fs.readFileSync(defaultPath, "utf8");
+    } catch {
+      return null;
+    }
+  }
+
+  if (
+    process.env.APPLE_PRIVATE_KEY &&
+    process.env.APPLE_PRIVATE_KEY.includes("PRIVATE KEY")
+  ) {
+    return process.env.APPLE_PRIVATE_KEY;
+  }
+
+  return null;
 }
 
 function getGooglePlayPackageName(): string {
@@ -166,6 +200,32 @@ function loadGoogleServiceAccount(): any | null {
         return null;
       }
     }
+  }
+
+  // Check default path in keys folder
+  const defaultKeysPath = path.join(process.cwd(), "keys", "google-service-account.json");
+  if (fs.existsSync(defaultKeysPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(defaultKeysPath, "utf8"));
+    } catch {
+      return null;
+    }
+  }
+
+  // Check for any .json file in keys folder that has client_email
+  const keysDir = path.join(process.cwd(), "keys");
+  if (fs.existsSync(keysDir)) {
+    try {
+      const files = fs.readdirSync(keysDir).filter((f) => f.endsWith(".json"));
+      for (const file of files) {
+        try {
+          const content = JSON.parse(fs.readFileSync(path.join(keysDir, file), "utf8"));
+          if (content?.client_email && content?.private_key) {
+            return content;
+          }
+        } catch {}
+      }
+    } catch {}
   }
 
   if (saJsonEnv && String(saJsonEnv).trim()) {

@@ -1,168 +1,121 @@
-# I Need Prayer — Client Integration & Credentials Requirement Guide
+# Client Setup & Integration Guide: In-App Coins, Payments & SMS Verification
 
 **Project:** I Need Prayer  
-**Target Platforms:** iOS (Apple App Store), Android (Google Play Store), Web/Backend (Node.js/Express)  
-**Document Purpose:** Clear technical specifications of what is currently implemented in the codebase and the exact credentials/configurations required from the client's developer portals.
+**Document Version:** 2.0 (Client Edition)  
+**Target:** Executive & Non-Technical Client Reference  
 
 ---
 
-## 1. Executive Summary: What Is Currently Implemented in Code
+## 1. What We Have Built & Configured in Your Application
 
-The codebase features a **production-ready, dual-channel monetization and wallet ecosystem**:
+The complete monetization, wallet balance, and user communication infrastructure is now fully developed, tested, and integrated:
 
-1. **Pre-configured Coin Packages & Bonus Structure:**
-   * 5 coin packages are defined in the backend (`src/contants.ts`), with automated tier bonuses handled entirely server-side (bonus coins are granted automatically without needing separate products on the stores).
-2. **Apple In-App Purchases (iOS):**
-   * Server-side receipt and StoreKit 2 JWS verification in `src/services/iapVerify.service.ts`.
-   * Replay-attack and duplicate-transaction protection (receipt hashes tracked in MongoDB).
-   * Automatic wallet crediting upon cryptographic receipt validation.
-3. **Google Play Billing (Android):**
-   * Server-to-server validation via Google Play Developer API (`androidpublisher.googleapis.com`).
-   * Validates purchase tokens, checks purchase state (`purchaseState === 0`), and automatically consumes consumable products.
-4. **Stripe Payments (Credit/Debit Card & Web):**
-   * Pre-integrated Stripe Hosted Checkout Session generator (`POST /api/wallet/coins/purchase`).
-   * Webhook processor for `checkout.session.completed` (`/api/webhook/stripe`) to credit coins asynchronously.
-5. **Twilio SMS Service:**
-   * Centralized SMS dispatcher (`src/services/sms.service.ts`) with international E.164 phone normalization, verification OTP dispatch, and simulated fallback.
+### 🪙 In-App Coin Store & Tier Bonuses
+* A 5-tier coin store is ready for your users.
+* **Automated Bonus System:** Higher tiers automatically credit extra bonus coins to the buyer’s wallet at no additional store setup cost (for example, purchasing the 500 Coin tier automatically awards **525 Coins** to the user).
+
+### 💳 Instant In-App Wallet Crediting
+* The moment a user completes payment on iOS, Android, or Web, coins are instantly deposited into their in-app wallet balance.
+* Every purchase, bonus grant, and coin transaction is recorded in an automated internal ledger for clear transaction tracking.
+
+### 🛡️ Built-in Fraud & Receipt Verification
+* Real-time server-side verification directly with Apple and Google Play servers.
+* The system cryptographically confirms that payment was received by the app stores before granting coins, preventing fake receipts, cloned transactions, and billing fraud.
+
+### 💳 Direct Credit & Debit Card Payments (Stripe)
+* A pre-integrated Stripe checkout flow for credit/debit card purchases and web transactions.
+
+### 📲 Instant SMS & Phone Verification (Twilio)
+* Automated SMS delivery service for phone verification and secure OTP codes.
+* Handles international phone number formatting (E.164) automatically.
 
 ---
 
-## 2. Coin Packages & Product SKU Mapping
+## 2. In-App Purchase Products to Create in the App Stores
 
-The following 5 In-App Purchase products must exist in both Apple App Store Connect and Google Play Console:
+Please set up the following **5 Consumable Products** inside Apple App Store Connect and Google Play Console:
 
-| Tier Name | Wallet Credit (Coins) | Base + Bonus Breakdown | Retail Price (USD) | Apple Product ID (SKU) | Google Play Product ID |
+| Package Name | Customer Receives (Coins) | Bonus Included | Price (USD) | Apple Product ID (SKU) | Google Play Product ID |
 | :--- | :---: | :---: | :---: | :--- | :--- |
-| **Starter** | **100 Coins** | 100 Base + 0 Bonus | \$0.99 | `com.shawntorres.ineedprayer.coins100` | `coins100` |
-| **Popular** | **525 Coins** | 500 Base + 25 Bonus | \$4.99 | `com.shawntorres.ineedprayer.coins500` | `coins500` |
-| **Supporter** | **1,100 Coins** | 1,000 Base + 100 Bonus | \$9.99 | `com.shawntorres.ineedprayer.coins1000` | `coins1000` |
-| **Best Value** | **2,750 Coins** | 2,500 Base + 250 Bonus | \$24.99 | `com.shawntorres.ineedprayer.coins2500` | `coins2500` |
-| **Patron** | **5,750 Coins** | 5,000 Base + 750 Bonus | \$49.99 | `com.shawntorres.ineedprayer.coins5000` | `coins5000` |
+| **Starter** | **100 Coins** | Standard | \$0.99 | `com.shawntorres.ineedprayer.coins100` | `coins100` |
+| **Popular** | **525 Coins** | +25 Bonus | \$4.99 | `com.shawntorres.ineedprayer.coins500` | `coins500` |
+| **Supporter** | **1,100 Coins** | +100 Bonus | \$9.99 | `com.shawntorres.ineedprayer.coins1000` | `coins1000` |
+| **Best Value** | **2,750 Coins** | +250 Bonus | \$24.99 | `com.shawntorres.ineedprayer.coins2500` | `coins2500` |
+| **Patron** | **5,750 Coins** | +750 Bonus | \$49.99 | `com.shawntorres.ineedprayer.coins5000` | `coins5000` |
 
-> **Note on Bonus Coins:** Apple and Google Play Console only need the base product SKU and price. The bonus coins (+25, +100, +250, +750) are calculated and deposited into the user's wallet automatically by the backend upon receipt verification.
-
----
-
-## 3. What We Need From Apple App Store Connect (iOS)
-
-### Required Information & Assets:
-1. **App Bundle Identifier:**
-   * Expected: `com.shawntorres.ineedprayer` (or the client's registered Bundle ID).
-2. **App-Specific Shared Secret:**
-   * **Where to find it:**
-     1. Sign in to [App Store Connect](https://appstoreconnect.apple.com/).
-     2. Open your App → Navigate to **App Information** (or **In-App Purchases**).
-     3. Click **App-Specific Shared Secret** → Click **Generate**.
-     4. Copy the 32-character hexadecimal string.
-3. **In-App Purchase Product Configuration:**
-   * Navigate to **Monetization** → **In-App Purchases**.
-   * Create **5 Consumable** in-app purchase products using the exact Product IDs from the table in Section 2.
-   * Fill in display names, English descriptions, and pricing tiers (\$0.99, \$4.99, \$9.99, \$24.99, \$49.99).
+> **Important Note:** You only need to enter the base product name and standard retail price in Apple and Google consoles. The bonus coins (+25, +100, +250, +750) are automatically calculated and added to the user's wallet by our system upon purchase confirmation.
 
 ---
 
-## 4. What We Need From Google Play Console (Android)
+## 3. What We Need From You (Client Action Items)
 
-### Required Information & Assets:
-1. **Android Package Name:**
-   * Current package name: `com.ineedprayer`
-2. **5 In-App Products Created in Google Play Console:**
-   * **Where to set up:**
-     1. Open [Google Play Console](https://play.google.com/console) → Select your App.
-     2. In the left menu, scroll down to **Monetize** → **Products** → **In-app products**.
-     3. Click **Create product** for each of the 5 SKUs:
-        * Product IDs: `coins100`, `coins500`, `coins1000`, `coins2500`, `coins5000`.
-     4. Set product type to **One-time / Consumable** and assign corresponding prices (\$0.99 to \$49.99).
-     5. Set Status to **Active**.
-3. **Google Cloud Service Account JSON Key File:**
-   * Required for the backend to cryptographically verify purchase tokens against Google's servers.
-   * **Step-by-step setup:**
-     1. Open [Google Cloud Console](https://console.cloud.google.com/) for the GCP project linked to your Google Play Console account.
-     2. Go to **APIs & Services** → **Library** → Search for **Google Play Android Developer API** → Click **Enable**.
-     3. Go to **APIs & Services** → **Credentials** → Click **Create Credentials** → **Service Account**.
-     4. Name it `iap-verifier` → Click **Create and Continue**.
-     5. Click on the created service account → Go to the **Keys** tab → **Add Key** → **Create new key** → Choose **JSON** format and download the file.
-     6. Go back to [Google Play Console](https://play.google.com/console) → **Users & Permissions** → **Invite new user**.
-     7. Paste the email address of the service account (`iap-verifier@...iam.gserviceaccount.com`).
-     8. Grant the following permissions:
-        * **View app information and download bulk reports (read-only)**
-        * **View financial data, orders, and cancellation survey responses**
-        * **Manage in-app products and subscriptions**
-     9. Send us the downloaded **`service-account.json` key file**.
+To connect the application to your live business accounts, please provide the credentials and configurations listed below:
 
 ---
 
-## 5. What We Need From Stripe Dashboard
+### A. Apple App Store Connect (iOS)
 
-### Required Information:
-1. **Stripe Secret API Key (`STRIPE_SECRET_KEY`):**
-   * Log in to [Stripe Dashboard](https://dashboard.stripe.com/).
-   * Switch to **Live Mode** (or Test Mode for sandbox testing).
-   * Go to **Developers** → **API keys** → Copy the **Secret key** (starts with `sk_live_...` or `sk_test_...`).
-2. **Stripe Webhook Signing Secret (`STRIPE_WEBHOOK_SECRET`):**
-   * Go to **Developers** → **Webhooks** → Click **Add endpoint**.
-   * **Endpoint URL:** `https://<YOUR_BACKEND_DOMAIN>/api/webhook/stripe`
-   * **Events to listen for:** `checkout.session.completed`
-   * Click **Add endpoint** → Reveal **Signing secret** (starts with `whsec_...`).
-
----
-
-## 6. What We Need From Twilio Console (SMS Service)
-
-### Required Information:
-1. **Twilio Account SID (`TWILIO_ACCOUNT_SID`):**
-   * Found on the main page of [Twilio Console](https://console.twilio.com/) (starts with `AC...`).
-2. **Twilio Auth Token (`TWILIO_AUTH_TOKEN`):**
-   * Located right below the Account SID on the Twilio dashboard.
-3. **Twilio Phone Number (`TWILIO_PHONE_NUMBER`):**
-   * Active phone number purchased in Twilio in international format (e.g., `+12345678901`).
+1. **Confirm App Bundle ID:**  
+   * Expected: `com.shawntorres.ineedprayer` (or your official registered Bundle ID).
+2. **Create the 5 Consumable Products:**  
+   * In [App Store Connect](https://appstoreconnect.apple.com/) ➔ Select your App ➔ **Monetization** ➔ **In-App Purchases**.
+   * Create each tier as **Consumable** using the exact Apple Product IDs from the table above.
+3. **App-Specific Shared Secret:**  
+   * In App Store Connect ➔ **App Information** (or **In-App Purchases**).
+   * Click **App-Specific Shared Secret** ➔ Click **Generate**.
+   * Copy the generated key string and send it to us.
 
 ---
 
-## 7. Master Production Environment Configuration (`.env`)
+### B. Google Play Console (Android)
 
-Once the client provides the items above, the backend `.env` will be populated as follows:
+1. **Confirm Android Package Name:**  
+   * Expected: `com.ineedprayer`.
+2. **Create the 5 In-App Products:**  
+   * In [Google Play Console](https://play.google.com/console) ➔ Select your App ➔ **Monetize** ➔ **Products** ➔ **In-app products**.
+   * Create each tier with IDs: `coins100`, `coins500`, `coins1000`, `coins2500`, `coins5000`.
+   * Set Type to **One-time / Consumable**, match the pricing, and set status to **Active**.
+3. **Google Play Service Account Key (`.json` file):**  
+   * This allows our server to securely verify purchases with Google Play.
+   * **Steps:**
+     1. In [Google Cloud Console](https://console.cloud.google.com/) for your Play Console project, enable the **Google Play Android Developer API**.
+     2. Go to **Credentials** ➔ **Create Credentials** ➔ **Service Account** (Name: `iap-verifier`).
+     3. Under the **Keys** tab, click **Add Key** ➔ **Create new key (JSON format)** and download the `.json` file.
+     4. In [Google Play Console](https://play.google.com/console) ➔ **Users & Permissions** ➔ **Invite user**, invite the service account email and grant:
+        * *View financial data, orders, and cancellation survey responses*
+        * *Manage in-app products and subscriptions*
+     5. Send us the downloaded **`.json` file**.
 
-```env
-# ============================================================
-# STRIPE PAYMENTS (Coins & Subscriptions)
-# ============================================================
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_WEBHOOK_SECRET=whsec_...
+---
 
-# ============================================================
-# APPLE APP STORE (iOS In-App Purchases)
-# ============================================================
-APPLE_BUNDLE_ID=com.shawntorres.ineedprayer
-APPLE_SHARED_SECRET=your_app_specific_shared_secret
+### C. Stripe Dashboard (Card & Web Payments)
 
-# ============================================================
-# GOOGLE PLAY CONSOLE (Android In-App Purchases)
-# ============================================================
-GOOGLE_PLAY_PACKAGE_NAME=com.ineedprayer
-GOOGLE_SERVICE_ACCOUNT_PATH=./config/google-service-account.json
+1. **Stripe Secret Key:**  
+   * In [Stripe Dashboard](https://dashboard.stripe.com/) ➔ **Developers** ➔ **API keys** ➔ Copy the **Secret key** (`sk_live_...` or `sk_test_...`).
+2. **Stripe Webhook Signing Secret:**  
+   * In **Developers** ➔ **Webhooks** ➔ **Add endpoint**:
+     * **URL:** `https://<YOUR_API_DOMAIN>/api/webhook/stripe`
+     * **Event to select:** `checkout.session.completed`
+   * Reveal and share the **Signing secret** (`whsec_...`).
 
-# ============================================================
-# TWILIO SMS SERVICE (Phone & Church Verification)
-# ============================================================
-TWILIO_ACCOUNT_SID=ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-TWILIO_AUTH_TOKEN=your_twilio_auth_token
-TWILIO_PHONE_NUMBER=+1234567890
+---
 
-# ============================================================
-# AGORA LIVE STREAMING & RECORDING
-# ============================================================
-AGORA_APP_ID=your_agora_app_id
-AGORA_APP_CERTIFICATE=your_agora_app_certificate
-AGORA_CUSTOMER_ID=your_agora_customer_id
-AGORA_CUSTOMER_SECRET=your_agora_customer_secret
+### D. Twilio Console (SMS & Phone Verification)
 
-# ============================================================
-# BACKBLAZE B2 + CLOUDFLARE CDN STORAGE
-# ============================================================
-B2_S3_ENDPOINT=https://s3.us-west-004.backblazeb2.com
-B2_BUCKET=your_bucket_name
-B2_KEY_ID=your_b2_key_id
-B2_APPLICATION_KEY=your_b2_app_key
-B2_PUBLIC_URL_BASE=https://cdn.ineedprayer.world
-```
+1. **Twilio Account SID:**  
+   * Located on the main dashboard of your [Twilio Console](https://console.twilio.com/) (starts with `AC...`).
+2. **Twilio Auth Token:**  
+   * Located right below the Account SID on your dashboard.
+3. **Twilio Phone Number:**  
+   * The active phone number purchased in your Twilio account in international format (e.g., `+12345678901`).
+
+---
+
+## 4. Checklist: Assets to Send Us
+
+Please gather and send the following items:
+
+* [ ] **Apple:** App-Specific Shared Secret (Text string)
+* [ ] **Google Play:** Service Account Key (`.json` file)
+* [ ] **Stripe:** Secret Key (`sk_live_...`) & Webhook Signing Secret (`whsec_...`)
+* [ ] **Twilio:** Account SID, Auth Token & Twilio Phone Number
